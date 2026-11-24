@@ -1,7 +1,7 @@
 {
-  "package_id": "com.glanceodds.g2",
+  "package_id": "com.sidelineodds.g2",
   "edition": "202601",
-  "name": "Glance Odds",
+  "name": "Sideline Odds",
   "version": "0.1.0",
   "min_sdk_version": "0.0.16",
   "entrypoint": "index.html",
@@ -9,12 +9,12 @@
   "permissions": [
     {
       "name": "network",
-      "desc": "Talks to your own Glance Odds server, which holds the Hyperliquid API wallet key.",
+      "desc": "Talks to your own Sideline Odds server, which holds the Hyperliquid API wallet key.",
       "whitelist": ["http://localhost:8788"]
     },
     {
       "name": "g2-microphone",
-      "desc": "Voice bets. Listens only after you tap (up to 5 s), and for 3 s after a card you asked for, to hear \"yes\" or \"no\". The audio goes to your Glance Odds server, which sends it to OpenAI for transcription."
+      "desc": "Voice bets. Listens only after you tap (up to 5 s), and for 3 s after a card you asked for, to hear \"yes\" or \"no\". The audio goes to your Sideline Odds server, which sends it to OpenAI for transcription."
     }
   ],
   "supported_languages": ["en"]

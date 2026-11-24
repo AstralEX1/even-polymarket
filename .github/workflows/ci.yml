@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # >= 22.18 runs the .ts sources directly
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # Build and pack with the localhost whitelist (no PUBLIC_URL): proves app.json and the bundle pack cleanly.
+      - run: npm run pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ehpk
+          path: '*.ehpk'
+          if-no-files-found: error

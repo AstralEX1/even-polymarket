@@ -1,4 +1,4 @@
-# Glance Odds (even-polymarket)
+# Sideline Odds (even-polymarket)
 
 Live odds and your bet on Even Realities G2 glasses. Polymarket gives the live odds, and the order goes to a Hyperliquid **testnet** outcome market. You say "20 on KC" and tap YES.
 
@@ -53,7 +53,7 @@ tailscale funnel 8788                              # stable https://<machine>.<t
 Set `PUBLIC_URL` to that address and `APP_TOKEN` to 16+ characters; the server refuses to start with a shorter one. Then run:
 
 ```bash
-npm run pack      # build; whitelists PUBLIC_URL's origin and makes it the default server → glance-odds.ehpk
+npm run pack      # build; whitelists PUBLIC_URL's origin and makes it the default server → sideline-odds.ehpk
 ```
 
 ## Test and build
@@ -62,8 +62,11 @@ npm run pack      # build; whitelists PUBLIC_URL's origin and makes it the defau
 npm test          # node --test (the live test runs only with LIVE=1)
 npm run typecheck
 npm run build     # app/dist
-npm run pack      # app/dist → glance-odds.ehpk (see Real glasses)
+npm run pack      # app/dist → sideline-odds.ehpk (see Real glasses)
+npm run e2e       # ~45 s in the simulator on the fake venue: the demo's swing card, cash out on the glasses list, server says "Sold"
 ```
+
+CI (`.github/workflows/ci.yml`) runs typecheck, tests and pack on every push to main and every PR. The e2e needs a display (it opens the simulator window), so it runs locally only.
 
 ## Layout
 
