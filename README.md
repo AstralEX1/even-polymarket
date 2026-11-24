@@ -1,6 +1,45 @@
-# Sideline Odds (even-polymarket)
+# Sideline Odds
 
-Live odds and your bet on Even Realities G2 glasses. Polymarket gives the live odds, and the order goes to a Hyperliquid **testnet** outcome market. You say "20 on KC" and tap YES.
+**Bet on the game without looking away from it.**
+
+Even Realities G2 glasses show the live odds of the game on TV and what your bet is worth. Say "20 on KC", tap the ring, and a signed order fills on Hyperliquid testnet. When the odds swing, a card offers the cash-out in one tap.
+
+<p>
+  <img src="docs/screenshots/01-market.png" width="288" alt="Glasses: KC vs BUF, KC 57% and rising, a bar, your bet +$1.60 on 20 KC">
+  <img src="docs/screenshots/05-card-cash-out.png" width="288" alt="A card after a swing: Cash out 20 KC for $13.60 (+$4.60)? Keep / Cash out 20 KC">
+</p>
+
+- **One number, then one tap.** The glasses show the game, its chance as a bar and your bet in money, and nothing else until it matters. Cards name the action (`Keep` / `Cash out 20 KC`, `Not now` / `Buy 29 KC`), with the safe one first.
+- **Real orders, with the brakes built first.** The server signs IOC limit orders with a client order id, so a lost reply is resolved from the exchange, never guessed. A daily loss lock, a pause after a losing cash-out, and limits that take 24 h to raise all apply before any bet goes out.
+- **Live, not polled.** Polymarket's book streams over its websocket, and the rules run within 0.5 s of a move. Every live session is taped and can be played back.
+
+Hyperliquid **testnet** only: no real money, no advice. The mic listens only after a tap. The keys stay on your server, and they can trade but not withdraw.
+
+## Try it in 60 seconds
+
+```bash
+npm install && cp .env.example .env   # set APP_TOKEN, and VITE_APP_TOKEN to the same value
+npm run server                        # demo venue, no keys: you hold 20 KC in KC vs BUF
+npm run dev                           # second terminal: the app on :5174
+npm run sim                           # third terminal: the Even Hub simulator shows the glasses
+```
+
+About 40 s in, KC jumps about 18 points and a cash-out card appears. Scroll to `Cash out 20 KC` and tap. The glasses say `Cashing out 20 KC...` at once, then `Sold 20 KC for $13.60 (+$4.60)` with the time it took.
+
+| Listening | The press lands at once | Done | Phone page |
+|---|---|---|---|
+| <img src="docs/screenshots/03-listening.png" width="200" alt="● Listening"> | <img src="docs/screenshots/06-cashing-out.png" width="200" alt="Cashing out 20 KC..."> | <img src="docs/screenshots/07-sold.png" width="200" alt="Sold 20 KC for $13.60 (+$4.60)"> | <img src="docs/screenshots/09-phone.jpg" width="120" alt="Phone page: games to tap on and off, two limits"> |
+
+## Before and during the build week
+
+The rules ask what existed before 23 Nov. A first working version was written on 22 Nov: the Hyperliquid testnet venue with L1 signing, Polymarket odds, the rules and limits, the HTTP API, and the glasses app (market page, card, voice end-pointing). In this repository that is commits `109b148`–`fb2ce74`.
+
+Built during the week:
+- lost-reply resolution by `cloid` and `expiresAfter`
+- parallel ticks, and settlements read from `userFills`
+- the redesigned glasses screen and phone page, with games matched to Polymarket automatically
+- live odds over the websocket, and tape and replay
+- CI and the simulator end-to-end run
 
 ## Architecture
 
