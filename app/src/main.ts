@@ -12,8 +12,9 @@ import {
 } from '@evenrealities/even_hub_sdk'
 import type { Card, Config, SessionState, ShownConfig } from '../../server/src/types.ts'
 import { NUMBER_FIELDS } from '../../server/src/rules.ts'
-import { choices, MIC, renderScreen } from './view.ts'
+import { CARD_TEXT_HEIGHT, choices, MIC, PADDING, renderScreen } from './view.ts'
 import { endpointer } from './endpoint.ts'
+import { exitDialogue } from './exit.ts'
 import { marketLine, parseMarkets } from './markets.ts'
 import * as api from './api.ts'
 
@@ -23,14 +24,18 @@ const LISTEN_MS = 5000 // the cap; it usually stops when you go quiet
 const CONFIRM_MS = 3000 // long enough for "yes", short enough not to catch the room
 const MIN_AUDIO_BYTES = 9600 // 0.3 s of 16 kHz s16le
 const NOTE_MS = 5000
-const CARD_TEXT_HEIGHT = 176 // the card's text on top, the NO / YES list below
+const SCROLL_COOLDOWN_MS = 300 // a fast swipe fires several scroll events
 
 let state: SessionState | null = null
 let offline = false
 let focus = 0 // which market the session screen shows; voice bets go to it
 let bridge: EvenAppBridge | null = null
-let pageCard: string | null = null // the card the glasses page shows, null for the market page
+let pageCard: string | null | undefined = null // the card the glasses page shows, null for the market page, undefined when the page must be built again
 let shown = ''
+let closed = false // the system ended the app (SYSTEM_EXIT / ABNORMAL_EXIT): nothing is drawn until it comes back
+let recreate = false // the next page build is followed by a startup call, after the exit dialogue was answered "No"
+const exit = exitDialogue(() => { const b = bridge; if (b) void serial(() => b.shutDownPageContainer(1)) }, restore)
+let lastScroll = 0
 let answering = false
 let mic: 'off' | 'starting' | 'on' | 'sending' = 'off'
 let audio: Uint8Array[] = []
@@ -46,14 +51,14 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 // ── glasses ────────────────────────────────────────────────
 
 const textBox = (content: string, capture: boolean, height: number) => new TextContainerProperty({
-  xPosition: 0, yPosition: 0, width: 576, height, borderWidth: 0, borderColor: 5, paddingLength: 4,
+  xPosition: 0, yPosition: 0, width: 576, height, borderWidth: 0, borderColor: 5, paddingLength: PADDING,
   containerID: 1, containerName: 'main', content, isEventCapture: capture ? 1 : 0,
 })
 
 /** The firmware's own list draws the selection and scrolls it. The safe action comes first, so a stray tap on a new card declines it. */
 const choiceList = (card: Card) => new ListContainerProperty({
   xPosition: 0, yPosition: CARD_TEXT_HEIGHT, width: 288, height: 288 - CARD_TEXT_HEIGHT,
-  borderWidth: 0, borderColor: 5, paddingLength: 4, containerID: 2, containerName: 'choice', isEventCapture: 1,
+  borderWidth: 0, borderColor: 5, paddingLength: PADDING, containerID: 2, containerName: 'choice', isEventCapture: 1,
   itemContainer: new ListItemContainerProperty({ itemCount: 2, itemWidth: 0, isItemSelectBorderEn: 1, itemName: choices(card) }),
 })
 
@@ -76,16 +81,31 @@ async function draw() {
   const text = renderScreen(state, focus, offline, Date.now() < voiceNote.until ? voiceNote.text : '', Date.now(), !spoke && mic === 'off')
   $('preview').textContent = card ? `${text}\n\n[ ${choices(card)[0]} ]  ${choices(card)[1]}` : text
   const b = bridge
-  if (!b) return
+  if (!b || closed || exit.isOut()) return
   if ((card?.id ?? null) !== pageCard) {
     // A fresh page per card: its list starts on No, and no choice carries over from the card before.
     pageCard = card?.id ?? null
     shown = text
-    return serial(() => b.rebuildPageContainer(new RebuildPageContainer(page(text, card))))
+    // A refused page (false) or a failed call is built again on the next draw.
+    if (!await serial(() => b.rebuildPageContainer(new RebuildPageContainer(page(text, card))))) pageCard = undefined
+    if (recreate) {
+      // After "No" a plain rebuild no longer reaches the page: the reference app rebuilds, then creates it once more (the result is ignored).
+      recreate = false
+      await serial(() => b.createStartUpPageContainer(new CreateStartUpPageContainer(page(text, card))))
+    }
+    return
   }
   if (text === shown) return
   shown = text
-  return serial(() => b.textContainerUpgrade(new TextContainerUpgrade({ containerID: 1, containerName: 'main', content: text })))
+  // An update the page did not take (false) means the page is not the one we think: rebuild it.
+  if (!await serial(() => b.textContainerUpgrade(new TextContainerUpgrade({ containerID: 1, containerName: 'main', content: text })))) pageCard = undefined
+}
+
+/** The exit dialogue is gone: build the page again. */
+function restore() {
+  pageCard = undefined
+  recreate = true
+  return draw()
 }
 
 let polling = false
@@ -224,29 +244,32 @@ async function onEvent(event: Parameters<Parameters<EvenAppBridge['onEvenHubEven
   const types = [eventTypeOf(event.sysEvent), eventTypeOf(event.textEvent), event.listEvent?.eventType ?? null]
   const is = (t: OsEventTypeList) => types.includes(t)
 
-  const b = bridge
-  if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) {
-    // Exit works on every screen. The system asks first, so the mic stops only once the exit is confirmed (below).
-    if (b) void serial(() => b.shutDownPageContainer(1))
-    return
-  }
-  if (is(OsEventTypeList.SYSTEM_EXIT_EVENT) || is(OsEventTypeList.ABNORMAL_EXIT_EVENT)) return stopListening()
+  // Exit works on every screen. The system asks first, so the mic stops only once the exit is confirmed (below).
+  if (await exit.take(types)) return
+  if (is(OsEventTypeList.SYSTEM_EXIT_EVENT) || is(OsEventTypeList.ABNORMAL_EXIT_EVENT)) { closed = true; return stopListening() }
   if (is(OsEventTypeList.FOREGROUND_ENTER_EVENT)) {
     shown = ''
+    if (closed) { closed = false; pageCard = undefined } // back after the system ended it: the page is built again
     return poll()
   }
+  if (is(OsEventTypeList.FOREGROUND_EXIT_EVENT)) return // polling goes on, so a card the server raises still reaches the glasses
   // A card: the firmware list moves the selection itself, and a press picks. Anything but a press on it is ignored.
   if (event.listEvent) return (event.listEvent.eventType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT ? choose(event.listEvent) : undefined
   if (is(OsEventTypeList.CLICK_EVENT) && mic === 'on') return sendVoice()
   if (pageCard) return // on a card page the list takes the input
-  if (is(OsEventTypeList.SCROLL_TOP_EVENT)) { focus--; return draw() }
-  if (is(OsEventTypeList.SCROLL_BOTTOM_EVENT)) { focus++; return draw() }
+  if (is(OsEventTypeList.SCROLL_TOP_EVENT) || is(OsEventTypeList.SCROLL_BOTTOM_EVENT)) {
+    if (Date.now() - lastScroll < SCROLL_COOLDOWN_MS) return
+    lastScroll = Date.now()
+    focus += is(OsEventTypeList.SCROLL_BOTTOM_EVENT) ? 1 : -1
+    return draw()
+  }
   if (is(OsEventTypeList.CLICK_EVENT)) return startListening()
 }
 
 async function startGlasses() {
+  let b: EvenAppBridge
   try {
-    bridge = await Promise.race([
+    b = await Promise.race([
       waitForEvenAppBridge(),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('no bridge')), BRIDGE_TIMEOUT_MS)),
     ])
@@ -254,11 +277,21 @@ async function startGlasses() {
     $('glasses').textContent = 'Glasses: not connected (plain browser)'
     return
   }
-  shown = renderScreen(null, focus, offline)
-  pageCard = null // starts on the market page; the first poll switches to a card page if one is waiting
-  const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page(shown, null)))
+  // The server and token the Even app keeps, read before the startup page; the phone page and a poll follow if they differ.
+  if (await api.loadSettings(k => serial(() => b.getLocalStorage(k)), (k, v) => void serial(() => b.setLocalStorage(k, v)))) {
+    showSettings()
+    void showConfig()
+    void poll()
+  }
+  const text = renderScreen(null, focus, offline)
+  const result = await serial(() => b.createStartUpPageContainer(new CreateStartUpPageContainer(page(text, null))))
   $('glasses').textContent = result === 0 ? 'Glasses: connected' : `Glasses: display error ${result}`
-  bridge.onEvenHubEvent(e => void onEvent(e))
+  shown = text
+  // The one-shot startup call is spent either way; after a refusal the next draw builds the page with a rebuild.
+  pageCard = result === 0 ? null : undefined
+  bridge = b // only now can a poll's draw reach the glasses: before this the startup page did not exist yet
+  b.onEvenHubEvent(e => void onEvent(e))
+  void draw()
 }
 
 // ── phone page ─────────────────────────────────────────────
@@ -272,10 +305,18 @@ function fillForm(c: ShownConfig, done: string) {
   msg(c.raisesAt ? `${done}. Higher limits start ${new Date(c.raisesAt).toLocaleString()}. Saving again replaces them.` : done)
 }
 
-async function startPhonePage() {
+function showSettings() {
   const s = api.getSettings()
   $<HTMLInputElement>('server').value = s.server
   $<HTMLInputElement>('token').value = s.token
+}
+
+async function showConfig() {
+  try { fillForm(await api.getConfig(), '') } catch { msg('Set the server and token, then Connect') }
+}
+
+async function startPhonePage() {
+  showSettings()
 
   $('connect').addEventListener('click', async () => {
     api.saveSettings($<HTMLInputElement>('server').value.trim(), $<HTMLInputElement>('token').value.trim())
@@ -297,7 +338,7 @@ async function startPhonePage() {
     }
   })
 
-  try { fillForm(await api.getConfig(), '') } catch { msg('Set the server and token, then Connect') }
+  await showConfig()
 }
 
 window.addEventListener('beforeunload', () => { if (mic !== 'off') void bridge?.audioControl(false) })

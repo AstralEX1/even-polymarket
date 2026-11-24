@@ -16,4 +16,6 @@ if (publicUrl) {
 }
 const file = join(mkdtempSync(join(tmpdir(), 'sideline-odds-')), 'app.json')
 writeFileSync(file, JSON.stringify(manifest, null, 2))
-execFileSync('evenhub', ['pack', file, 'app/dist', '-o', 'sideline-odds.ehpk'], { stdio: 'inherit' })
+// The CLI stamps min_app_version from the SDK's floor; without --sdk-ver it reads npm's latest SDK, which may be newer than the one bundled.
+const sdkVersion = JSON.parse(readFileSync('node_modules/@evenrealities/even_hub_sdk/package.json', 'utf8')).version
+execFileSync('evenhub', ['pack', file, 'app/dist', '-o', 'sideline-odds.ehpk', '--sdk-ver', sdkVersion], { stdio: 'inherit' })

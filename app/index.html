@@ -5,20 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sideline Odds</title>
   <style>
-    :root { color-scheme: dark; --bg: #0d0f0e; --card: #161a18; --line: #2a302d; --text: #e6ece8; --muted: #8b958f; --accent: #5fe08a; }
+    /* Even app dark tokens (Even Hub design guidelines). Text on the yellow accent is dark: white on it is unreadable. */
+    :root { color-scheme: dark; --bg: #111111; --card: #1A1A1A; --input: rgba(255,255,255,0.08); --text: #FFFFFF; --muted: #8A8A8A; --accent: #FEF991; }
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 -apple-system, system-ui, sans-serif; padding: 16px; }
-    h1 { font-size: 20px; margin: 0 0 4px; }
-    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 20px 0 8px; }
-    section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
-    label { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; padding: 20px; }
+    h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 4px; }
+    h2 { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 24px 0 8px; }
+    section { background: var(--card); border-radius: 12px; padding: 16px; }
+    label { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; }
     label span { color: var(--muted); }
-    input, textarea { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font: inherit; }
+    input, textarea { background: var(--input); color: var(--text); border: 0; border-radius: 8px; padding: 8px; font: inherit; }
     input { width: 9em; text-align: right; }
     #server, #token { width: 100%; text-align: left; }
     textarea { width: 100%; min-height: 5.5em; font-family: ui-monospace, monospace; font-size: 13px; }
-    button { margin-top: 10px; width: 100%; padding: 12px; border: 0; border-radius: 10px; background: var(--accent); color: #062010; font: 600 15px system-ui; }
-    pre { margin: 0; white-space: pre-wrap; color: var(--accent); font: 13px/1.35 ui-monospace, monospace; min-height: 10em; }
+    button { margin-top: 12px; width: 100%; padding: 12px; border: 0; border-radius: 10px; background: var(--accent); color: #232323; font: 600 16px system-ui; }
+    pre { margin: 0; white-space: pre-wrap; color: #5fe08a; font: 13px/1.35 ui-monospace, monospace; min-height: 10em; } /* the glasses' green: this mirrors their screen */
     .muted { color: var(--muted); font-size: 13px; }
     #message { min-height: 1.4em; margin-top: 8px; }
     a { color: var(--accent); }
