@@ -17,7 +17,6 @@ G2 glasses ──BLE── Even app WebView (app/)  ──HTTP + Bearer──▶
 
 - The app holds no keys. The server holds the Hyperliquid **API wallet** key: it can trade but cannot withdraw.
 - `assertTestnet` stops the server on any host other than `https://api.hyperliquid-testnet.xyz`.
-- A voice bet whose whole shares come to less than Hyperliquid's $10 order minimum (at the limit price) gets no card. The reply names the amount that is enough.
 - A YES runs these checks again on the server: card id and expiry, data younger than 10 s, daily-loss lock, cool-down, max bet at the worst fill price, and best price within slippage. Then it sends an IOC limit order with a client order id (`cloid`) and `expiresAfter` = nonce + 10 s.
 - If the reply is lost (timeout, dropped connection or 5xx), the server waits until the order's expiry has passed, then asks `orderStatus` by `cloid` and sums `userFills` for that order. The result is a definite answer: never arrived, did not fill, or filled N at an average price. The answer is "unknown result" only when those reads fail too.
 - Limits: lowering one applies at once, and raising one waits 24 h (`applyLimits`). The day's lock and cool-down survive a restart (`server/data/day.json`, atomic write).
@@ -77,7 +76,6 @@ npm run pack      # app/dist → glance-odds.ehpk (see Real glasses)
 - Settlement detection compares USDC against held tokens over one 2 s tick, so a transfer at the same moment blurs it (`session.ts`).
 - The day boundary uses the server's time zone, which is correct while the server runs on the user's machine.
 - Resolving a lost reply assumes this machine's clock is at most 2 s ahead of Hyperliquid's (`EXPIRY_MARGIN_MS`).
-- Whether Hyperliquid also applies the $10 minimum to a sell (a cash-out of a small position) is not verified. Sells are not pre-checked.
 - Speech end-pointing uses a fixed noise-floor ratio and is not tuned on real glasses.
 - Settings live in WebView `localStorage`.
 - The default market (`27159`, KC vs BUF, 27 Nov 2026) expires. `daily:BTC` rolls over by itself.

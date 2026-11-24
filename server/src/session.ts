@@ -1,5 +1,5 @@
 import type { Account, Card, Config, Market, MarketView, Odds, SessionState, Venue } from './types.ts'
-import { cashOutQuestion, equity, evaluate, holdingsOf, limitPrice, livePrice, makeCard, MIN_ORDER_USD, sellAction, swing, type Sample } from './rules.ts'
+import { cashOutQuestion, equity, evaluate, holdingsOf, limitPrice, livePrice, makeCard, sellAction, swing, type Sample } from './rules.ts'
 import { parseConfirm, parseIntent, pickSide } from './voice.ts'
 import { dollars, money, pct, usd } from './format.ts'
 
@@ -218,11 +218,8 @@ export function createSession(venue: Venue, oddsSource: Odds, getConfig: () => C
       return done(false, `Failed: ${errorText(e)}`)
     }
     if (ask === null) return done(false, `No sellers for ${side.name}`)
-    const limit = limitPrice('buy', ask, cfg.slippagePts)
-    const shares = Math.floor(amount / limit) // the stake holds even at the worst fill
+    const shares = Math.floor(amount / limitPrice('buy', ask, cfg.slippagePts)) // the stake holds even at the worst fill
     if (shares < 1) return done(false, `${usd(amount)} buys no ${side.name} at ${pct(ask)}`)
-    // Refused here, not after YES: the smallest whole dollar amount whose shares clear the minimum at this limit.
-    if (shares * limit < MIN_ORDER_USD - 1e-9) return done(false, `Under the ${usd(MIN_ORDER_USD)} order minimum. Say ${usd(Math.ceil(Math.ceil(MIN_ORDER_USD / limit) * limit))} or more`)
     const lp = livePrice({ mids, live }, m, i)
     const card = makeCard(now, `voice:bet:${side.coin}`, `${m.title}: ${side.name} now ${lp === undefined ? '-' : pct(lp)}`,
       `Buy ${shares} ${side.name} for ${dollars(shares * ask)}? Pays ${usd(shares)} if ${side.name} wins`,

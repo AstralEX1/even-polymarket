@@ -68,13 +68,11 @@ test('YES is refused when the price moved past the slippage, when data is stale,
   assert.deepEqual(t.venue.calls, [])
 })
 
-test('a bet whose whole shares come to under the $10 order minimum makes no card and says what is enough', async () => {
+test('a small bet makes a card: outcome orders have no $10 minimum', async () => {
   const t = setup()
   await t.s.tick()
-  // 18 × 0.53 = $9.54 at the limit: Hyperliquid would refuse it after the YES
-  assert.deepEqual(await t.s.voice('10 on KC', '27159'), { ok: false, message: 'Under the $10 order minimum. Say $11 or more' })
-  assert.equal(t.s.state().card, null)
-  assert.equal((await t.s.voice('11 on KC', '27159')).ok, true) // 20 × 0.53 = $10.60
+  assert.equal((await t.s.voice('2 on KC', '27159')).ok, true)
+  assert.equal(t.s.state().card!.question, 'Buy 3 KC for $1.53? Pays $3 if KC wins') // testnet filled a 2-share IOC at 0.65
 })
 
 test('bets over the cap, an unknown side and talk that is not a bet make no card', async () => {

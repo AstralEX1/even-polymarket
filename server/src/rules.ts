@@ -5,7 +5,7 @@ export const DEFAULT_CONFIG: Config = {
   // KC vs BUF on Nov 27 is listed on both Hyperliquid testnet and Polymarket; daily:BTC follows the protocol's daily binary.
   markets: [{ key: '27159', polymarket: 'nfl-kc-buf-2026-11-27' }, { key: 'daily:BTC' }],
   maxBetUsd: 25,
-  defaultBetUsd: 15, // above the $10 minimum order even after rounding down to whole shares
+  defaultBetUsd: 15, // outcome orders have no $10 minimum: a 2-share IOC at 0.65 filled on testnet (24 Nov 2026)
   dailyLossLimitUsd: 50,
   coolDownMin: 10,
   swingPts: 15,
@@ -71,9 +71,6 @@ export const makeCard = (now: number, key: string, title: string, question: stri
 /** What a cash-out gets you and makes you, rather than a price to decode. */
 export const cashOutQuestion = (shares: number, name: string, price: number, cost: number) =>
   `Cash out ${shares} ${name} for ${dollars(shares * price)} (${money(shares * price - cost)})?`
-
-/** Hyperliquid refuses an order worth less than this, counted at its limit price. */
-export const MIN_ORDER_USD = 10
 
 /** Worst price an order from a card may fill at: the card price ± slippage, kept inside 0.01..0.99. */
 export const limitPrice = (type: 'buy' | 'sell', price: number, slippagePts: number) =>
