@@ -1,0 +1,66 @@
+# Glance Odds (even-polymarket)
+
+Live odds and your bet on Even Realities G2 glasses. Polymarket gives the live odds, and the order goes to a Hyperliquid **testnet** outcome market. You say "20 on KC" and tap YES.
+
+## Architecture
+
+```
+G2 glasses ──BLE── Even app WebView (app/)  ──HTTP + Bearer──▶  server/ (Node 22, no framework)
+  text page / card + No|Yes list               GET  /api/state           ├─ session.ts  tick every 2 s: markets, mids, account, odds → rules → cards
+  mic PCM 16 kHz → endpointer                  POST /api/answer          ├─ rules.ts    swing / cash-out cards, limits, equity
+  phone page: server, token, limits            POST /api/voice           ├─ hyperliquid.ts  testnet /info + signed /exchange (IOC limit)
+                                               GET|PUT /api/config       ├─ sign.ts     L1 action signing (msgpack + keccak + secp256k1)
+                                                                         ├─ polymarket.ts   Gamma slug → CLOB midpoint
+                                                                         ├─ stt.ts      OpenAI gpt-4o-mini-transcribe (optional)
+                                                                         └─ fake.ts     scripted venue + odds for VENUE=fake
+```
+
+- The app holds no keys. The server holds the Hyperliquid **API wallet** key: it can trade but cannot withdraw.
+- `assertTestnet` stops the server on any host other than `https://api.hyperliquid-testnet.xyz`.
+- A YES runs these checks again on the server: card id and expiry, data younger than 10 s, daily-loss lock, cool-down, max bet at the worst fill price, and best price within slippage. Then it sends an IOC limit order.
+- A write that times out or returns 5xx is reported as "unknown result", never as "failed".
+- Limits: lowering one applies at once, and raising one waits 24 h (`applyLimits`). The day's lock and cool-down survive a restart (`server/data/day.json`, atomic write).
+
+## Run
+
+Requires Node ≥ 22.18 (runs `.ts` directly).
+
+```bash
+npm install
+cp .env.example .env        # set APP_TOKEN
+npm run server              # :8788, VENUE=fake: no keys, scripted market
+npm run dev                 # app on :5174
+npm run sim                 # Even Hub simulator → http://localhost:5174
+```
+
+On the phone page, set the server to `http://localhost:8788` and the token to `APP_TOKEN`.
+
+Live testnet: set `VENUE=hyperliquid`, `HL_ACCOUNT` (your testnet address) and `HL_AGENT_KEY` (from app.hyperliquid-testnet.xyz/API). Voice needs `OPENAI_API_KEY`.
+
+## Test and build
+
+```bash
+npm test          # node --test, 106 tests (1 live test runs only with LIVE=1)
+npm run typecheck
+npm run build     # app/dist
+npx evenhub pack app/app.json app/dist -o glance-odds.ehpk
+```
+
+## Layout
+
+| Path | What |
+|---|---|
+| `server/src` | session, rules, venue (Hyperliquid), odds (Polymarket), HTTP, STT, config and limits |
+| `server/test` | unit tests with fake fetch and clock; signing vectors from the Hyperliquid Python SDK |
+| `app/src` | glasses UI (`main.ts`, `view.ts`), voice end-pointing (`endpoint.ts`), API client |
+| `app/test` | render limits, endpointer, market parsing |
+| `docs/screenshots` | simulator frames |
+
+## Known limitations
+
+- Settlement detection compares USDC against held tokens over one 2 s tick, so a transfer at the same moment blurs it (`session.ts`).
+- The day boundary uses the server's time zone, which is correct while the server runs on the user's machine.
+- `app.json` whitelists only `http://localhost:8788`, so a packed app reaches only a local server.
+- Speech end-pointing uses a fixed noise-floor ratio and is not tuned on real glasses.
+- Settings live in WebView `localStorage`.
+- The default market (`27159`, KC vs BUF, 27 Nov 2026) expires. `daily:BTC` rolls over by itself.
