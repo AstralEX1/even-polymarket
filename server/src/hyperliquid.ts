@@ -20,7 +20,8 @@ type Level = { px: string; sz: string }
 type Status = { filled?: { totalSz: string; avgPx: string }; error?: string }
 type ExchangeReply = { status: string; response: { data?: { statuses?: Status[] } } | string }
 type OrderStatus = { status: 'unknownOid' } | { status: 'order'; order: { order: { oid: number } } }
-type Fill = { oid: number; px: string; sz: string }
+/** A userFills entry. A settlement is one too: dir 'Settlement', px 1.0 (won) or 0.0 (lost), closedPnl = payout - cost. */
+type Fill = { coin: string; oid: number; px: string; sz: string; dir: string; time: number; closedPnl: string }
 
 /** 'class:priceBinary|underlying:BTC' → fields; plain-text descriptions have none. */
 function fields(description: string): Record<string, string> {
@@ -154,6 +155,17 @@ export function createHyperliquid(o: {
           .filter(b => b.coin.startsWith('+') && Number(b.total) > 0)
           .map(b => ({ token: b.coin, shares: Number(b.total), cost: Number(b.entryNtl) })),
       }
+    },
+
+    async settlements(since) {
+      const fills = await info<Fill[]>({ type: 'userFills', user: o.account })
+      const out: Record<string, number> = {}
+      for (const f of fills) {
+        if (f.dir !== 'Settlement' || f.time < since || !f.coin.startsWith('#')) continue
+        const token = `+${f.coin.slice(1)}`
+        out[token] = (out[token] ?? 0) + Number(f.closedPnl)
+      }
+      return out
     },
 
     async best(coin, side) {

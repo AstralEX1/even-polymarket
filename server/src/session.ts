@@ -1,5 +1,5 @@
 import type { Account, Card, Config, Market, MarketView, Odds, SessionState, Venue } from './types.ts'
-import { cashOutQuestion, equity, evaluate, holdingsOf, limitPrice, livePrice, makeCard, MIN_ORDER_USD, sellAction, swing, type Sample } from './rules.ts'
+import { cashOutQuestion, equity, evaluate, holdingsOf, limitPrice, livePrice, makeCard, sellAction, swing, type Sample } from './rules.ts'
 import { parseConfirm, parseIntent, pickSide } from './voice.ts'
 import { dollars, money, pct, usd } from './format.ts'
 
@@ -31,6 +31,7 @@ export interface DayStore {
 const TOAST_MS = 5_000
 const DAY_MS = 86_400_000
 const STALE_MS = 10_000
+const SETTLE_SLACK_MS = 60_000 // settlement fills looked up from a minute before the last good tick
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const memoryStore = (): DayStore => { let d: DayState | null = null; return { load: () => d, save: x => { d = x } } }
@@ -47,6 +48,7 @@ export function createSession(venue: Venue, oddsSource: Odds, getConfig: () => C
   let toast: { text: string; until: number } | null = null
   let error: string | null = null
   let updatedAt = 0
+  let wrote = 0 // bumped each time an order puts a fresh account in place
 
   const say = (text: string) => { toast = { text, until: clock() + TOAST_MS } }
   const saveDay = () => { if (day) store.save(day) }
@@ -60,21 +62,32 @@ export function createSession(venue: Venue, oddsSource: Odds, getConfig: () => C
   async function tick() {
     const cfg = getConfig()
     const now = clock()
+    const wroteBefore = wrote
+    let nextMarkets: Market[]
     let next: Account
     let nextMids: Record<string, number>
     try {
-      markets = await venue.markets(cfg.markets.map(m => m.key))
-      nextMids = await venue.mids()
-      next = await venue.account()
+      // At once: one slow read costs one timeout, not three in a row against the 10 s freshness limit.
+      [nextMarkets, nextMids, next] = await Promise.all([venue.markets(cfg.markets.map(m => m.key)), venue.mids(), venue.account()])
     } catch (e) {
       error = errorText(e) // keep the last good data, skip rules on a partial read
       return
     }
-    // A holding that vanished settled (our own sells refresh `account` at once, so they are not seen here).
-    // It lost when the USDC it paid out is below its cost; that starts the cool-down like a losing cash-out.
-    // shortcut: USDC moved by anything else in the same 2 s (a trade on the web) blurs this; track settlements by outcome if that matters.
+    markets = nextMarkets
+    // An order filled while these reads were out and already put the account after it in place: this read is older.
+    if (wrote !== wroteBefore) next = account
+    // A holding that vanished settled or was sold elsewhere (our own sells refresh `account` at once, so they are not seen here).
+    // A lost one starts the cool-down like a losing cash-out. Hyperliquid books a settlement as a fill with its realised PnL,
+    // which stays exact when other USDC moves in the same tick. One not booked (a sale on the web, or a fill not listed yet)
+    // falls back to the USDC it paid out against its cost.
+    // shortcut: that fallback still reads other USDC moved in the same 2 s as part of the sale; match userFills by token if web sales matter.
     const gone = account.holdings.filter(h => !next.holdings.some(x => x.token === h.token))
-    if (gone.length && next.usdc - account.usdc < gone.reduce((sum, h) => sum + h.cost, 0) - 0.005) coolDown()
+    if (gone.length) {
+      const booked = await venue.settlements(updatedAt - SETTLE_SLACK_MS).catch((): Record<string, number> => ({}))
+      const unbooked = gone.filter(h => !(h.token in booked))
+      const paidOut = next.usdc - account.usdc
+      if (gone.some(h => booked[h.token] < 0) || (unbooked.length && paidOut < unbooked.reduce((sum, h) => sum + h.cost, 0) - 0.005)) coolDown()
+    }
     // USDC that arrived while no holding changed is a transfer in (faucet, perps), not a win: it must not widen the loss limit.
     const unchanged = next.holdings.length === account.holdings.length &&
       next.holdings.every(x => account.holdings.some(h => h.token === x.token && h.shares === x.shares))
@@ -170,6 +183,7 @@ export function createSession(venue: Venue, oddsSource: Odds, getConfig: () => C
     }
     try {
       account = await venue.account() // the new balance shows now, and the tick does not take this sell for a settlement
+      wrote++
     } catch { /* the next tick catches up */ }
     say(message)
     return { ok: true, message }
@@ -212,11 +226,8 @@ export function createSession(venue: Venue, oddsSource: Odds, getConfig: () => C
       return done(false, `Failed: ${errorText(e)}`)
     }
     if (ask === null) return done(false, `No sellers for ${side.name}`)
-    const limit = limitPrice('buy', ask, cfg.slippagePts)
-    const shares = Math.floor(amount / limit) // the stake holds even at the worst fill
+    const shares = Math.floor(amount / limitPrice('buy', ask, cfg.slippagePts)) // the stake holds even at the worst fill
     if (shares < 1) return done(false, `${usd(amount)} buys no ${side.name} at ${pct(ask)}`)
-    // Refused here, not after YES: the smallest whole dollar amount whose shares clear the minimum at this limit.
-    if (shares * limit < MIN_ORDER_USD - 1e-9) return done(false, `Under the ${usd(MIN_ORDER_USD)} order minimum. Say ${usd(Math.ceil(Math.ceil(MIN_ORDER_USD / limit) * limit))} or more`)
     const lp = livePrice({ mids, live }, m, i)
     const card = makeCard(now, `voice:bet:${side.coin}`, `${m.title}: ${side.name} now ${lp === undefined ? '-' : pct(lp)}`,
       `Buy ${shares} ${side.name} for ${dollars(shares * ask)}? Pays ${usd(shares)} if ${side.name} wins`,

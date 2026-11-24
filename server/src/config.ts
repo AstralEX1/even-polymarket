@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { Config, WatchedMarket } from './types.ts'
 import type { DayState, DayStore } from './session.ts'
-import { DEFAULT_CONFIG, MIN_ORDER_USD, NUMBER_FIELDS } from './rules.ts'
+import { DEFAULT_CONFIG, NUMBER_FIELDS } from './rules.ts'
 
 const MAX_MARKETS = 10
 export const RAISE_DELAY_MS = 86_400_000
@@ -34,7 +34,6 @@ export function validateConfig(input: unknown): Config {
   for (const field of NUMBER_FIELDS) out[field] = positive(c[field], field)
   if (new Set(out.markets.map(m => m.key)).size !== out.markets.length) throw new Error('each market once')
   if (out.defaultBetUsd > out.maxBetUsd) throw new Error('defaultBetUsd must not be above maxBetUsd')
-  if (out.defaultBetUsd < MIN_ORDER_USD) throw new Error(`defaultBetUsd must be at least ${MIN_ORDER_USD}, the Hyperliquid order minimum`)
   if (out.cashOutAt >= 100) throw new Error('cashOutAt must be below 100 cents')
   if (out.swingPts >= 100) throw new Error('swingPts must be below 100 cents')
   if (out.slippagePts > 20) throw new Error('slippagePts must be 20 cents or less')

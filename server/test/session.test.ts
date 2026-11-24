@@ -68,13 +68,11 @@ test('YES is refused when the price moved past the slippage, when data is stale,
   assert.deepEqual(t.venue.calls, [])
 })
 
-test('a bet whose whole shares come to under the $10 order minimum makes no card and says what is enough', async () => {
+test('a small bet makes a card: outcome orders have no $10 minimum', async () => {
   const t = setup()
   await t.s.tick()
-  // 18 × 0.53 = $9.54 at the limit: Hyperliquid would refuse it after the YES
-  assert.deepEqual(await t.s.voice('10 on KC', '27159'), { ok: false, message: 'Under the $10 order minimum. Say $11 or more' })
-  assert.equal(t.s.state().card, null)
-  assert.equal((await t.s.voice('11 on KC', '27159')).ok, true) // 20 × 0.53 = $10.60
+  assert.equal((await t.s.voice('2 on KC', '27159')).ok, true)
+  assert.equal(t.s.state().card!.question, 'Buy 3 KC for $1.53? Pays $3 if KC wins') // testnet filled a 2-share IOC at 0.65
 })
 
 test('bets over the cap, an unknown side and talk that is not a bet make no card', async () => {
@@ -280,4 +278,61 @@ test('a spoken "yes" buys like a YES tap, "no" skips, and anything else leaves t
   await t.s.voice('15 on BUF', '27159')
   assert.deepEqual(await t.s.confirm('no thanks', t.s.state().card!.id), { ok: true, message: 'Skipped' })
   assert.equal(t.venue.calls.length, 1)
+})
+
+test('Hyperliquid reads go out at once, so one slow read costs one timeout', async () => {
+  const t = setup()
+  let release!: () => void
+  const gate = new Promise<void>(r => { release = r })
+  const asked: string[] = []
+  for (const k of ['markets', 'mids', 'account'] as const) {
+    const real = (t.venue[k] as () => Promise<unknown>).bind(t.venue)
+    ;(t.venue as any)[k] = async (...a: unknown[]) => { asked.push(k); await gate; return (real as any)(...a) }
+  }
+  const ticking = t.s.tick()
+  await new Promise(r => setImmediate(r))
+  assert.deepEqual(asked, ['markets', 'mids', 'account']) // all three before any answered
+  release()
+  await ticking
+  assert.equal(t.s.state().markets.length, 1)
+})
+
+test('an order that fills while a tick is reading keeps the account it wrote', async () => {
+  const t = setup()
+  t.venue.acct.holdings = [{ token: '+271590', shares: 20, cost: 12 }]
+  await t.s.tick()
+  await t.s.voice('cash out', '27159')
+  const card = t.s.state().card!
+  // This tick reads the account before the sell and gets its answer after it.
+  let release!: () => void
+  const gate = new Promise<void>(r => { release = r })
+  const read = t.venue.account.bind(t.venue)
+  t.venue.account = async () => { t.venue.account = read; const before = await read(); await gate; return before }
+  const ticking = t.s.tick()
+  await new Promise(r => setImmediate(r))
+  assert.equal((await t.s.answer(card.id, true)).message, 'Sold 20 KC for $9.80 (-$2.20)')
+  release()
+  await ticking
+  assert.deepEqual(t.s.state().markets[0].holdings, []) // not the sold holding back from the older read
+  assert.equal(t.s.state().usdc, 1009.8)
+})
+
+test('a booked settlement decides the cool-down even when other USDC moved in the same tick', async () => {
+  const lost = setup()
+  lost.venue.acct.holdings = [{ token: '+271590', shares: 30, cost: 12 }]
+  await lost.s.tick()
+  lost.venue.acct.holdings = []
+  lost.venue.acct.usdc += 100 // a transfer landed with the settlement: by USDC alone this looks like a win
+  lost.venue.settled = { '+271590': -12 }
+  await lost.s.tick()
+  assert.ok(lost.s.state().coolDownUntil > 0)
+
+  const won = setup()
+  won.venue.acct.holdings = [{ token: '+271590', shares: 30, cost: 12 }]
+  await won.s.tick()
+  won.venue.acct.holdings = []
+  won.venue.acct.usdc += 30 - 50 // paid $30 while $50 went out: by USDC alone this looks like a loss
+  won.venue.settled = { '+271590': 18 }
+  await won.s.tick()
+  assert.equal(won.s.state().coolDownUntil, 0)
 })

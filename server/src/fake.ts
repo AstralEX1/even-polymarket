@@ -20,6 +20,8 @@ export class FakeVenue implements Venue {
   failNext: string | Error | null = null
   /** Every read throws with this message while set */
   failReads: string | null = null
+  /** token → realised PnL of a settlement Hyperliquid booked */
+  settled: Record<string, number> = {}
 
   private read<T>(v: T): Promise<T> {
     return this.failReads ? Promise.reject(new Error(this.failReads)) : Promise.resolve(structuredClone(v))
@@ -28,6 +30,7 @@ export class FakeVenue implements Venue {
   async markets(keys: string[]) { return this.read(this.list.filter(m => keys.includes(m.key))) }
   async mids() { return this.read(this.midMap) }
   async account() { return this.read(this.acct) }
+  async settlements() { return this.read(this.settled) }
 
   async best(coin: string, s: Side) {
     const mid = this.midMap[coin]
