@@ -227,3 +227,21 @@ test('live: demo games price on Polymarket', { skip: !process.env.LIVE }, async 
     console.log(outcome, slug, `${a.name} ${p[0]} / ${b.name} ${p[1]}`)
   }
 })
+
+test('prices: with a feed, the websocket book answers and REST only fills in while it has none', async () => {
+  const { fetch, calls } = fake({
+    [`${GAMMA}/markets?slug=nfl-kc-buf-2026-11-27`]: [MONEYLINE],
+    [`${CLOB}/midpoint?token_id=${token(MONEYLINE, 0)}`]: { mid: '0.41' },
+  })
+  const watched: string[][] = []
+  let live: number | undefined
+  const feed = { watch: (t: string[]) => { watched.push(t) }, mid: () => live, onChange() {}, close() {} }
+  const pm = createPolymarket({ fetch, feed })
+  assert.equal((await pm.prices('nfl-kc-buf-2026-11-27', [KC, BUF]))?.[0], 0.41) // no book yet: REST
+  assert.deepEqual(watched, [[token(MONEYLINE, 0)]])
+  live = 0.6
+  const before = calls.length
+  const p = await pm.prices('nfl-kc-buf-2026-11-27', [KC, BUF])
+  assert.ok(p && Math.abs(p[0] - 0.6) < 1e-9 && Math.abs(p[1] - 0.4) < 1e-9)
+  assert.equal(calls.length, before) // the book answered: no request
+})

@@ -1,4 +1,5 @@
 import type { Odds, OutcomeSide } from './types.ts'
+import type { Feed } from './feed.ts'
 
 const GAMMA = 'https://gamma-api.polymarket.com'
 const CLOB = 'https://clob.polymarket.com'
@@ -36,7 +37,8 @@ const list = (v: unknown): string[] => {
   }
 }
 
-export function createPolymarket(o: { fetch?: typeof fetch; clock?: () => number } = {}): Odds {
+/** With `feed`, prices come from the websocket's books and REST answers only while the socket has none. */
+export function createPolymarket(o: { fetch?: typeof fetch; clock?: () => number; feed?: Feed } = {}): Odds {
   const doFetch = o.fetch ?? fetch
   const clock = o.clock ?? Date.now
   const resolved = new Map<string, { until: number; markets: Promise<Candidate[]> }>()
@@ -91,9 +93,10 @@ export function createPolymarket(o: { fetch?: typeof fetch; clock?: () => number
       const pick = lines.length ? lines : hits
       const m = pick.length === 1 ? pick[0] : undefined
       if (!m) return null
-      const { mid } = await get<{ mid?: string }>(CLOB, `/midpoint?token_id=${m.tokens[m.idx[0]]}`)
-      const p = Number(mid)
-      if (!(p >= 0 && p <= 1)) throw new Error(`Polymarket bad midpoint ${mid}`)
+      const token = m.tokens[m.idx[0]]
+      o.feed?.watch([token])
+      const p = o.feed?.mid(token) ?? Number((await get<{ mid?: string }>(CLOB, `/midpoint?token_id=${token}`)).mid)
+      if (!(p >= 0 && p <= 1)) throw new Error(`Polymarket bad midpoint ${p}`)
       // The two tokens of a binary market have mirrored books, so one request prices both sides.
       return [p, 1 - p]
     },
