@@ -17,6 +17,7 @@ G2 glasses ──BLE── Even app WebView (app/)  ──HTTP + Bearer──▶
 
 - The app holds no keys. The server holds the Hyperliquid **API wallet** key: it can trade but cannot withdraw.
 - `assertTestnet` stops the server on any host other than `https://api.hyperliquid-testnet.xyz`.
+- A voice bet whose whole shares come to less than Hyperliquid's $10 order minimum (at the limit price) gets no card. The reply names the amount that is enough.
 - A YES runs these checks again on the server: card id and expiry, data younger than 10 s, daily-loss lock, cool-down, max bet at the worst fill price, and best price within slippage. Then it sends an IOC limit order.
 - A write that times out or returns 5xx is reported as "unknown result", never as "failed".
 - Limits: lowering one applies at once, and raising one waits 24 h (`applyLimits`). The day's lock and cool-down survive a restart (`server/data/day.json`, atomic write).
@@ -40,7 +41,7 @@ Live testnet: set `VENUE=hyperliquid`, `HL_ACCOUNT` (your testnet address) and `
 ## Test and build
 
 ```bash
-npm test          # node --test, 106 tests (1 live test runs only with LIVE=1)
+npm test          # node --test (the live test runs only with LIVE=1)
 npm run typecheck
 npm run build     # app/dist
 npx evenhub pack app/app.json app/dist -o glance-odds.ehpk
@@ -61,6 +62,7 @@ npx evenhub pack app/app.json app/dist -o glance-odds.ehpk
 - Settlement detection compares USDC against held tokens over one 2 s tick, so a transfer at the same moment blurs it (`session.ts`).
 - The day boundary uses the server's time zone, which is correct while the server runs on the user's machine.
 - `app.json` whitelists only `http://localhost:8788`, so a packed app reaches only a local server.
+- Whether Hyperliquid also applies the $10 minimum to a sell (a cash-out of a small position) is not verified. Sells are not pre-checked.
 - Speech end-pointing uses a fixed noise-floor ratio and is not tuned on real glasses.
 - Settings live in WebView `localStorage`.
 - The default market (`27159`, KC vs BUF, 27 Nov 2026) expires. `daily:BTC` rolls over by itself.

@@ -106,6 +106,7 @@ test('validateConfig checks markets and limits', () => {
   assert.throws(() => v({ markets: [{ key: '1', polymarket: 'Bad Slug' }] }), /slug/)
   assert.throws(() => v({ markets: [{ key: '1' }, { key: '1' }] }), /once/)
   assert.throws(() => v({ defaultBetUsd: 30, maxBetUsd: 25 }), /defaultBetUsd/)
+  assert.throws(() => v({ defaultBetUsd: 5 }), /order minimum/)
   assert.throws(() => v({ cashOutAt: 100 }), /cashOutAt/)
   assert.throws(() => v({ slippagePts: 50 }), /slippagePts/)
   assert.deepEqual(v({ markets: [{ key: 'daily:ETH', extra: 1 }] }).markets, [{ key: 'daily:ETH' }])
