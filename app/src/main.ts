@@ -17,7 +17,7 @@ import { endpointer } from './endpoint.ts'
 import { marketLine, parseMarkets } from './markets.ts'
 import * as api from './api.ts'
 
-const POLL_MS = 1000
+const POLL_MS = 500 // the server's state moves with the game's odds now; a card should not wait a second to show
 const BRIDGE_TIMEOUT_MS = 10_000
 const LISTEN_MS = 5000 // the cap; it usually stops when you go quiet
 const CONFIRM_MS = 3000 // long enough for "yes", short enough not to catch the room

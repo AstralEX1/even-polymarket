@@ -6,11 +6,13 @@ Live odds and your bet on Even Realities G2 glasses. Polymarket gives the live o
 
 ```
 G2 glasses ──BLE── Even app WebView (app/)  ──HTTP + Bearer──▶  server/ (Node 22, no framework)
-  text page / card + No|Yes list               GET  /api/state           ├─ session.ts  tick every 2 s: markets, mids, account, odds → rules → cards
+  text page / card + No|Yes list               GET  /api/state           ├─ session.ts  tick every 2 s, and within 0.5 s of an odds move: markets, mids, account, odds → rules → cards
   mic PCM 16 kHz → endpointer                  POST /api/answer          ├─ rules.ts    swing / cash-out cards, limits, equity
   phone page: server, token, limits            POST /api/voice           ├─ hyperliquid.ts  testnet /info + signed /exchange (IOC limit)
                                                GET|PUT /api/config       ├─ sign.ts     L1 action signing (msgpack + keccak + secp256k1)
                                                                          ├─ polymarket.ts   Gamma slug → CLOB midpoint
+                                                                         ├─ feed.ts     Polymarket market websocket: live books
+                                                                         ├─ tape.ts     record live ticks, replay them (VENUE=replay)
                                                                          ├─ stt.ts      OpenAI gpt-4o-mini-transcribe (optional)
                                                                          └─ fake.ts     scripted venue + odds for VENUE=fake
 ```
@@ -35,7 +37,9 @@ npm run sim                 # Even Hub simulator → http://localhost:5174
 
 On the phone page, set the server to `http://localhost:8788` and the token to `APP_TOKEN`.
 
-Live testnet: set `VENUE=hyperliquid`, `HL_ACCOUNT` (your testnet address) and `HL_AGENT_KEY` (from app.hyperliquid-testnet.xyz/API). Voice needs `OPENAI_API_KEY`.
+Live testnet: set `VENUE=hyperliquid`, `HL_ACCOUNT` (your testnet address) and `HL_AGENT_KEY` (from app.hyperliquid-testnet.xyz/API). Voice needs `OPENAI_API_KEY`. Polymarket odds stream over its market websocket (`feed.ts`); REST answers only while the socket has no book.
+
+Every live session is taped to `server/data/tapes/<UTC day>.jsonl`: markets, their Hyperliquid mids and Polymarket odds, each line a change, never the account. Play one back as a demo venue with `VENUE=replay TAPE=server/data/tapes/2026-11-27.jsonl TAPE_FROM=5400 TAPE_SPEED=1` (seconds into the tape): the real game, with a fresh $1000 demo account and fills at the recorded mid ± 1 cent.
 
 ### Real glasses
 
