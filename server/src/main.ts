@@ -6,6 +6,7 @@ import { applyLimits, fileDayStore, loadConfig, loadPending, saveConfig, savePen
 import { assertTestnet, createHyperliquid } from './hyperliquid.ts'
 import { createPolymarket } from './polymarket.ts'
 import { polymarketFeed, type Feed } from './feed.ts'
+import { record, replay } from './tape.ts'
 import { demo } from './fake.ts'
 import { transcribe } from './stt.ts'
 
@@ -29,7 +30,7 @@ const dataDir = new URL('../data/', import.meta.url)
 let venue: Venue
 let odds: Odds
 let feed: Feed | undefined
-const mode = env.VENUE === 'hyperliquid' ? 'hyperliquid' : 'fake'
+const mode = env.VENUE === 'hyperliquid' ? 'hyperliquid' : env.VENUE === 'replay' ? 'replay' : 'fake'
 if (mode === 'hyperliquid') {
   const base = env.HL_BASE || 'https://api.hyperliquid-testnet.xyz'
   try {
@@ -42,6 +43,15 @@ if (mode === 'hyperliquid') {
   venue = createHyperliquid({ base, account: env.HL_ACCOUNT!, agentKey: env.HL_AGENT_KEY! })
   feed = polymarketFeed()
   odds = createPolymarket({ feed })
+  // Every live session is taped, one file per UTC day: a game played back later is the same data the rules saw.
+  ;({ venue, odds } = record(fileURLToPath(new URL(`tapes/${new Date().toISOString().slice(0, 10)}.jsonl`, dataDir)), venue, odds))
+} else if (mode === 'replay') {
+  if (!env.TAPE) fail('Set TAPE to a tape to play back, e.g. server/data/tapes/2026-11-27.jsonl.')
+  try {
+    ({ venue, odds } = replay(env.TAPE, { fromSec: Number(env.TAPE_FROM) || 0, speed: Number(env.TAPE_SPEED) || 1 }))
+  } catch (e) {
+    fail(`Cannot play ${env.TAPE}: ${(e as Error).message}`)
+  }
 } else {
   ({ venue, odds } = demo(Date.now()))
 }
@@ -66,7 +76,7 @@ const shown = (): ShownConfig => {
   return pending ? { ...c, raisesAt: pending.at } : c
 }
 
-// The demo restarts from scratch, so only a real account keeps its lock and cool-down across restarts.
+// The demo and a replay restart from scratch, so only a real account keeps its lock and cool-down across restarts.
 const session = createSession(venue, odds, getConfig, mode !== 'hyperliquid' ? undefined : fileDayStore(fileURLToPath(new URL('day.json', dataDir))))
 
 let busy = false
