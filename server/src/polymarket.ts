@@ -1,4 +1,4 @@
-import type { Odds, OutcomeSide } from './types.ts'
+import type { Market, Odds, OutcomeSide } from './types.ts'
 import type { Feed } from './feed.ts'
 
 const GAMMA = 'https://gamma-api.polymarket.com'
@@ -7,7 +7,7 @@ const TIMEOUT_MS = 5000
 const RESOLVE_TTL_MS = 10 * 60_000
 const FAIL_TTL_MS = 60_000
 
-type GammaMarket = { outcomes?: unknown; clobTokenIds?: unknown; closed?: boolean; sportsMarketType?: string }
+type GammaMarket = { slug?: string; outcomes?: unknown; clobTokenIds?: unknown; closed?: boolean; sportsMarketType?: string }
 type Candidate = { outcomes: string[]; tokens: string[]; moneyline: boolean }
 
 const words = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(' ')
@@ -42,6 +42,7 @@ export function createPolymarket(o: { fetch?: typeof fetch; clock?: () => number
   const doFetch = o.fetch ?? fetch
   const clock = o.clock ?? Date.now
   const resolved = new Map<string, { until: number; markets: Promise<Candidate[]> }>()
+  const matched = new Map<string, { until: number; slug: string | null }>()
 
   async function get<T>(base: string, path: string): Promise<T> {
     const where = path.split('?')[0]
@@ -82,6 +83,20 @@ export function createPolymarket(o: { fetch?: typeof fetch; clock?: () => number
   }
 
   return {
+    async match(m: Market) {
+      if (!m.startsAt) return null
+      const hit = matched.get(m.key)
+      if (hit && clock() < hit.until) return hit.slug
+      // A moneyline's end date is its kick-off, which Hyperliquid's scheduledStart gives to the minute. The API refuses an
+      // empty range, so the window is a minute either side; at a busy minute (Sunday 18:00 UTC) it holds about 25 games.
+      const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z')
+      const raw = await get<GammaMarket[]>(GAMMA, `/markets?closed=false&sports_market_types=moneyline&end_date_min=${iso(m.startsAt - 60_000)}&end_date_max=${iso(m.startsAt + 60_000)}&limit=100`)
+      const hits = raw.filter(x => x.slug && matchSides(list(x.outcomes), m.sides))
+      const slug = hits.length === 1 ? hits[0].slug! : null
+      matched.set(m.key, { until: clock() + RESOLVE_TTL_MS, slug })
+      return slug
+    },
+
     async prices(slug, sides) {
       const hits = (await resolve(slug)).flatMap(m => {
         const idx = matchSides(m.outcomes, sides)

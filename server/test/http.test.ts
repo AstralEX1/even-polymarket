@@ -23,7 +23,8 @@ const session: Session = {
   hint: market => (market === '27159' ? 'KC, Kansas City Chiefs' : ''),
 }
 let config: Config = { ...DEFAULT_CONFIG }
-const server = createServer({ session, token: 'secret', getConfig: () => config, setConfig: c => (config = c) })
+const games = [{ key: '27159', title: 'KC vs BUF', startsAt: 1, polymarket: 'nfl-kc-buf-2026-11-27' }]
+const server = createServer({ session, token: 'secret', getConfig: () => config, setConfig: c => (config = c), games: async () => games })
 await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 after(() => server.close())
@@ -145,4 +146,9 @@ test('a short token is refused off loopback', () => {
   assert.equal(tokenProblem('short', '127.0.0.1'), null)
   assert.match(tokenProblem('short', '127.0.0.1', 'https://odds.example.ts.net') ?? '', /16/) // a tunnel makes loopback public
   assert.match(tokenProblem('', '127.0.0.1') ?? '', /APP_TOKEN/)
+})
+
+test('games for the phone page, behind the token', async () => {
+  assert.equal((await fetch(`${base}/api/games`)).status, 401)
+  assert.deepEqual(await (await fetch(`${base}/api/games`, { headers: auth })).json(), games)
 })

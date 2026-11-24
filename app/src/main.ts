@@ -10,7 +10,7 @@ import {
   AudioInputSource,
   type EvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
-import type { Card, Config, SessionState, ShownConfig } from '../../server/src/types.ts'
+import type { Card, Config, Game, SessionState, ShownConfig } from '../../server/src/types.ts'
 import { NUMBER_FIELDS } from '../../server/src/rules.ts'
 import { choices, MIC, renderScreen } from './view.ts'
 import { endpointer } from './endpoint.ts'
@@ -100,7 +100,8 @@ async function poll() {
   } finally {
     polling = false
   }
-  $('status').textContent = offline ? 'Server offline' : `Connected · ${state?.markets.length ?? 0} markets`
+  document.body.dataset.online = String(!offline)
+  $('status').textContent = offline ? 'Server offline' : 'Connected'
   await draw()
 }
 
@@ -251,57 +252,155 @@ async function startGlasses() {
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('no bridge')), BRIDGE_TIMEOUT_MS)),
     ])
   } catch {
-    $('glasses').textContent = 'Glasses: not connected (plain browser)'
+    $('glasses').textContent = '· no glasses here'
     return
   }
   shown = renderScreen(null, focus, offline)
   pageCard = null // starts on the market page; the first poll switches to a card page if one is waiting
   const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page(shown, null)))
-  $('glasses').textContent = result === 0 ? 'Glasses: connected' : `Glasses: display error ${result}`
+  $('glasses').textContent = result === 0 ? '· glasses on' : `· glasses display error ${result}`
   bridge.onEvenHubEvent(e => void onEvent(e))
 }
 
-// ── phone page ─────────────────────────────────────────────
+// ── phone page: one screen. Games are tapped on and off, the two limits that matter are in view, the rest is under More.
+//    Every change saves itself, as in the phone's own settings. ──
 
-const msg = (t: string) => { $('message').textContent = t }
+let config: ShownConfig | null = null
+let games: Game[] = []
+const BTC_DAILY: Game = { key: 'daily:BTC', title: 'BTC daily', startsAt: 0, polymarket: null }
+const LIMITS_NOTE = 'Lower limits apply at once. Higher ones start 24 hours after you set them.'
 
-/** Shows the limits in force; higher ones you asked for wait a day, and the page says when they start. */
-function fillForm(c: ShownConfig, done: string) {
-  for (const k of NUMBER_FIELDS) $<HTMLInputElement>(k).value = String(c[k])
-  $<HTMLTextAreaElement>('markets').value = c.markets.map(marketLine).join('\n')
-  msg(c.raisesAt ? `${done}. Higher limits start ${new Date(c.raisesAt).toLocaleString()}. Saving again replaces them.` : done)
+function say(text: string, error = false) {
+  $('message').textContent = text
+  $('message').classList.toggle('error', error)
 }
 
-async function startPhonePage() {
+/** "Live", "Today 21:30", "Thu 09:20": when the game is, in the phone's own time. */
+function kickoff(g: Game, now = Date.now()): string {
+  if (!g.startsAt) return 'Hyperliquid daily, ends 03:00 UTC'
+  if (g.startsAt <= now) return 'Live'
+  const d = new Date(g.startsAt)
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return d.toDateString() === new Date(now).toDateString() ? `Today ${time}` : `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`
+}
+
+function gameRow(g: Game, on: boolean): HTMLElement {
+  const b = document.createElement('button')
+  b.className = 'row'
+  b.setAttribute('role', 'listitem')
+  b.setAttribute('aria-pressed', String(on))
+  const text = document.createElement('span')
+  text.className = 'text'
+  const title = document.createElement('span')
+  title.className = 'title'
+  title.textContent = g.title // exchange data: text, never HTML
+  const sub = document.createElement('span')
+  sub.className = 'sub'
+  const when = kickoff(g)
+  const live = document.createElement('span')
+  live.className = when === 'Live' ? 'live' : ''
+  live.textContent = when
+  sub.append(live, g.startsAt ? (g.polymarket ? ' · Polymarket odds' : ' · testnet odds only') : '')
+  text.append(title, sub)
+  const check = document.createElement('span')
+  check.className = 'check'
+  check.textContent = '✓'
+  check.setAttribute('aria-hidden', 'true')
+  b.append(text, check)
+  b.addEventListener('click', () => void toggle(g))
+  return b
+}
+
+/** Offered games, BTC daily, then anything watched that is not offered (an id typed under More, a game that ended). */
+function renderGames() {
+  const on = new Set(config?.markets.map(m => m.key))
+  const offered = [...games, BTC_DAILY]
+  const others = (config?.markets ?? []).filter(m => !offered.some(g => g.key === m.key)).map((m): Game =>
+    ({ key: m.key, title: state?.markets.find(x => x.key === m.key)?.title ?? m.key, startsAt: 0, polymarket: m.polymarket ?? null }))
+  $('games').replaceChildren(...[...offered, ...others].map(g => gameRow(g, on.has(g.key))))
+}
+
+/** Shows the config in force: a refused value or a raise still waiting goes back to the limit that counts now. The markets box keeps what is being typed. */
+function show(c: ShownConfig) {
+  config = c
+  for (const k of NUMBER_FIELDS) $<HTMLInputElement>(k).value = String(c[k])
+  if (document.activeElement !== $('markets')) $<HTMLTextAreaElement>('markets').value = c.markets.map(marketLine).join('\n')
+  renderGames()
+}
+
+/** The server names fields as the config does ("defaultBetUsd must not be above maxBetUsd"); the page says them as its labels. */
+const plainly = (message: string) =>
+  NUMBER_FIELDS.reduce((m, k) => m.replaceAll(k, `"${$(k).closest('label')?.querySelector('span')?.textContent ?? k}"`), message)
+
+async function save(next: Config, done: string) {
+  try {
+    const shown = await api.putConfig(next)
+    show(shown)
+    say(shown.raisesAt ? `${done}. Higher limits start ${new Date(shown.raisesAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}.` : done)
+  } catch (e) {
+    if (config) show(config) // back to what is in force
+    say(plainly((e as Error).message), true)
+  }
+}
+
+const current = (): Config => {
+  const { raisesAt: _, ...c } = config!
+  return c
+}
+
+async function toggle(g: Game) {
+  if (!config) return say('Connect to your server first', true)
+  const on = config.markets.some(m => m.key === g.key)
+  const markets = on ? config.markets.filter(m => m.key !== g.key) : [...config.markets, g.polymarket ? { key: g.key, polymarket: g.polymarket } : { key: g.key }]
+  config = { ...config, markets }
+  renderGames() // the check moves on the tap, before the server answers
+  await save({ ...current(), markets }, on ? `${g.title} is off the glasses` : `${g.title} is on the glasses`)
+}
+
+async function connect() {
+  try {
+    show(await api.getConfig())
+    $('pair').hidden = true
+    $('more-server').append($('server-group')) // connected: the server moves under More
+    say(LIMITS_NOTE)
+  } catch (e) {
+    $('pair').hidden = false
+    $('pair').append($('server-group'))
+    say(api.getSettings().token ? `Cannot connect: ${(e as Error).message}` : 'Enter your server and token, then Connect', true)
+    return
+  }
+  try { games = await api.getGames() } catch { games = [] } // an older server has no list: BTC daily and typed ids still work
+  renderGames()
+}
+
+function startPhonePage() {
   const s = api.getSettings()
   $<HTMLInputElement>('server').value = s.server
   $<HTMLInputElement>('token').value = s.token
-
-  $('connect').addEventListener('click', async () => {
+  $('connect').addEventListener('click', () => {
     api.saveSettings($<HTMLInputElement>('server').value.trim(), $<HTMLInputElement>('token').value.trim())
-    try {
-      fillForm(await api.getConfig(), 'Connected')
-    } catch (e) {
-      msg(`Cannot connect: ${(e as Error).message}`)
-    }
-    void poll()
+    void connect().then(poll)
   })
-
-  $('save').addEventListener('click', async () => {
+  for (const k of NUMBER_FIELDS) {
+    $(k).addEventListener('change', () => {
+      if (!config) return
+      void save({ ...current(), [k]: Number($<HTMLInputElement>(k).value) }, 'Saved')
+    })
+  }
+  $('save').addEventListener('click', () => {
+    if (!config) return say('Connect to your server first', true)
     try {
-      const c = { markets: parseMarkets($<HTMLTextAreaElement>('markets').value) } as Config
-      for (const k of NUMBER_FIELDS) c[k] = Number($<HTMLInputElement>(k).value)
-      fillForm(await api.putConfig(c), 'Saved')
+      void save({ ...current(), markets: parseMarkets($<HTMLTextAreaElement>('markets').value) }, 'Markets saved')
     } catch (e) {
-      msg((e as Error).message)
+      say((e as Error).message, true)
     }
   })
-
-  try { fillForm(await api.getConfig(), '') } catch { msg('Set the server and token, then Connect') }
+  renderGames()
+  void connect()
 }
 
 window.addEventListener('beforeunload', () => { if (mic !== 'off') void bridge?.audioControl(false) })
-void startPhonePage()
+startPhonePage()
 void startGlasses()
 void poll()
 setInterval(poll, POLL_MS)

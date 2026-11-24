@@ -40,6 +40,7 @@ export function record(file: string, venue: Venue, odds: Odds, clock: () => numb
       best: (coin, side) => venue.best(coin, side),
       order: (asset, side, shares, limit) => venue.order(asset, side, shares, limit),
       settlements: since => venue.settlements(since),
+      upcoming: () => venue.upcoming(),
     },
     odds: {
       async prices(slug, sides) {
@@ -47,6 +48,7 @@ export function record(file: string, venue: Venue, odds: Odds, clock: () => numb
         write(`odds:${slug}`, p, { t: clock(), slug, p })
         return p
       },
+      match: m => odds.match(m),
     },
   }
 }

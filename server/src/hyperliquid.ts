@@ -6,6 +6,8 @@ const TESTNET_HOST = 'api.hyperliquid-testnet.xyz'
 const READ_TIMEOUT_MS = 8000
 const ORDER_TIMEOUT_MS = 10_000
 const META_TTL_MS = 60_000
+const LIVE_MS = 4 * 3_600_000 // a game that began this long ago may still be on
+const WEEK_MS = 7 * 86_400_000
 // shortcut: covers our clock running ahead of the exchange's by up to 2 s; an unsynced clock needs more.
 const EXPIRY_MARGIN_MS = 2000
 
@@ -140,6 +142,19 @@ export function createHyperliquid(o: {
         const market = toMarket(key, found)
         return market.endsAt && market.endsAt <= now ? [] : [market]
       })
+    },
+
+    async upcoming() {
+      const now = clock()
+      return (await outcomes())
+        .filter(x => x.sideSpecs.length === 2)
+        .filter(x => {
+          const f = fields(x.description)
+          const start = toMs(f.scheduledStart)
+          return f.participantA && f.participantB && start > now - LIVE_MS && start < now + WEEK_MS
+        })
+        .map(x => toMarket(String(x.outcome), x))
+        .sort((a, b) => a.startsAt - b.startsAt)
     },
 
     async mids() {
