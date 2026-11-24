@@ -1,4 +1,4 @@
-// Packs app/dist into glance-odds.ehpk. On a phone, localhost is the phone itself, so a packed app reaches this
+// Packs app/dist into sideline-odds.ehpk. On a phone, localhost is the phone itself, so a packed app reaches this
 // server through an https tunnel: PUBLIC_URL becomes the only origin in the network whitelist.
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -14,6 +14,6 @@ if (publicUrl) {
 } else {
   console.warn('PUBLIC_URL is not set: this package can only call http://localhost:8788, which works in the simulator, not on a phone.')
 }
-const file = join(mkdtempSync(join(tmpdir(), 'glance-odds-')), 'app.json')
+const file = join(mkdtempSync(join(tmpdir(), 'sideline-odds-')), 'app.json')
 writeFileSync(file, JSON.stringify(manifest, null, 2))
-execFileSync('evenhub', ['pack', file, 'app/dist', '-o', 'glance-odds.ehpk'], { stdio: 'inherit' })
+execFileSync('evenhub', ['pack', file, 'app/dist', '-o', 'sideline-odds.ehpk'], { stdio: 'inherit' })

@@ -1,5 +1,5 @@
 {
-  "name": "glance-odds",
+  "name": "sideline-odds",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -10,7 +10,8 @@
     "test": "node --test server/test/*.test.ts app/test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "build": "vite build --config app/vite.config.ts",
-    "pack": "npm run build && node --env-file-if-exists=.env scripts/pack.ts"
+    "pack": "npm run build && node --env-file-if-exists=.env scripts/pack.ts",
+    "e2e": "node scripts/e2e.ts"
   },
   "engines": {
     "node": ">=22.18"

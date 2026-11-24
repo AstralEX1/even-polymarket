@@ -90,4 +90,4 @@ createServer({
     return shown()
   },
   transcribe: openaiKey ? (pcm, hint) => transcribe(pcm, openaiKey, hint) : undefined,
-}).listen(port, host, () => console.log(`Glance Odds server on http://${host}:${port} (venue: ${mode}, voice: ${openaiKey ? 'on' : 'off'})`))
+}).listen(port, host, () => console.log(`Sideline Odds server on http://${host}:${port} (venue: ${mode}, voice: ${openaiKey ? 'on' : 'off'})`))

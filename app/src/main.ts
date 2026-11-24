@@ -10,9 +10,9 @@ import {
   AudioInputSource,
   type EvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
-import type { Config, SessionState, ShownConfig } from '../../server/src/types.ts'
+import type { Card, Config, SessionState, ShownConfig } from '../../server/src/types.ts'
 import { NUMBER_FIELDS } from '../../server/src/rules.ts'
-import { renderScreen } from './view.ts'
+import { choices, MIC, renderScreen } from './view.ts'
 import { endpointer } from './endpoint.ts'
 import { marketLine, parseMarkets } from './markets.ts'
 import * as api from './api.ts'
@@ -38,6 +38,7 @@ let endpoint: ((pcm: Uint8Array) => boolean) | null = null
 let listenTimer: ReturnType<typeof setTimeout> | undefined
 let confirmFor: string | null = null // the card this recording answers, null for a command
 let voiceNote = { text: '', until: 0 }
+let spoke = false // the first bet you speak retires the how-to line
 const note = (text: string, ms = NOTE_MS) => { voiceNote = { text, until: Date.now() + ms } }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -49,15 +50,15 @@ const textBox = (content: string, capture: boolean, height: number) => new TextC
   containerID: 1, containerName: 'main', content, isEventCapture: capture ? 1 : 0,
 })
 
-/** The firmware's own list draws the selection and scrolls it. No comes first, so a stray tap on a new card is a no. */
-const choiceList = () => new ListContainerProperty({
-  xPosition: 0, yPosition: CARD_TEXT_HEIGHT, width: 220, height: 288 - CARD_TEXT_HEIGHT,
+/** The firmware's own list draws the selection and scrolls it. The safe action comes first, so a stray tap on a new card declines it. */
+const choiceList = (card: Card) => new ListContainerProperty({
+  xPosition: 0, yPosition: CARD_TEXT_HEIGHT, width: 288, height: 288 - CARD_TEXT_HEIGHT,
   borderWidth: 0, borderColor: 5, paddingLength: 4, containerID: 2, containerName: 'choice', isEventCapture: 1,
-  itemContainer: new ListItemContainerProperty({ itemCount: 2, itemWidth: 0, isItemSelectBorderEn: 1, itemName: ['No', 'Yes'] }),
+  itemContainer: new ListItemContainerProperty({ itemCount: 2, itemWidth: 0, isItemSelectBorderEn: 1, itemName: choices(card) }),
 })
 
-const page = (text: string, card: boolean) => card
-  ? { containerTotalNum: 2, textObject: [textBox(text, false, CARD_TEXT_HEIGHT)], listObject: [choiceList()] }
+const page = (text: string, card: Card | null) => card
+  ? { containerTotalNum: 2, textObject: [textBox(text, false, CARD_TEXT_HEIGHT)], listObject: [choiceList(card)] }
   : { containerTotalNum: 1, textObject: [textBox(text, true, 288)] }
 
 // One bridge call at a time: a page rebuild, a text update and the mic switch in flight together can drop the BLE link.
@@ -72,15 +73,15 @@ async function draw() {
   const n = state?.markets.length ?? 0
   focus = n ? ((focus % n) + n) % n : 0
   const card = state?.card ?? null
-  const text = renderScreen(state, focus, offline, Date.now() < voiceNote.until ? voiceNote.text : '')
-  $('preview').textContent = card ? `${text}\n\n[ No ]  Yes` : text
+  const text = renderScreen(state, focus, offline, Date.now() < voiceNote.until ? voiceNote.text : '', Date.now(), !spoke && mic === 'off')
+  $('preview').textContent = card ? `${text}\n\n[ ${choices(card)[0]} ]  ${choices(card)[1]}` : text
   const b = bridge
   if (!b) return
   if ((card?.id ?? null) !== pageCard) {
     // A fresh page per card: its list starts on No, and no choice carries over from the card before.
     pageCard = card?.id ?? null
     shown = text
-    return serial(() => b.rebuildPageContainer(new RebuildPageContainer(page(text, !!card))))
+    return serial(() => b.rebuildPageContainer(new RebuildPageContainer(page(text, card))))
   }
   if (text === shown) return
   shown = text
@@ -116,7 +117,7 @@ async function startListening(card: string | null = null) {
   const ok = await serial(() => b.audioControl(true, AudioInputSource.Glasses))
   if (mic !== 'starting') { if (ok) await serial(() => b.audioControl(false)); return } // a press on the card stopped it meanwhile
   mic = ok ? 'on' : 'off'
-  note(ok ? (card ? 'Say "yes" or "no"' : 'Listening...') : 'Mic unavailable', ok ? Infinity : NOTE_MS)
+  note(ok ? `${MIC} ${card ? 'Say "yes" or "no"' : 'Listening'}` : 'Mic unavailable', ok ? Infinity : NOTE_MS)
   if (ok) listenTimer = setTimeout(() => void sendVoice(), card ? CONFIRM_MS : LISTEN_MS)
   return draw()
 }
@@ -134,18 +135,36 @@ async function stopListening() {
   if (wasOn && b) await serial(() => b.audioControl(false))
 }
 
+/** A fill's message with the seconds since the press or the end of the spoken "yes". Only fills are timed: "Bought" / "Sold" from the server. */
+const timed = (message: string, since: number) =>
+  /^(Bought|Sold) /.test(message) ? `${message} · ${((Date.now() - since) / 1000).toFixed(1)} s` : message
+
+/** The answer to a card, said at once on the glasses, then its result. */
+async function answerCard(card: Card, yes: boolean, since: number, send: () => Promise<{ ok: boolean; message: string }>) {
+  if (yes) {
+    // Said on the glasses at once, before the network: the press is seen to land.
+    note(`${card.action.type === 'buy' ? 'Buying' : 'Cashing out'} ${card.action.shares} ${card.action.sideName}...`, Infinity)
+    await draw()
+  }
+  try {
+    const r = await send()
+    note(timed(r.message, since)) // replaces the server's toast of the same words
+  } catch {
+    note('', 0) // a slow exchange outlives the request: the server's toast says how it ended
+  }
+}
+
 /** A press on the card's list: the item under the selection answers it. */
 async function choose(ev: { currentSelectItemIndex?: number; currentSelectItemName?: string }) {
   const card = state?.card
   if (!card || card.id !== pageCard || answering) return
-  // protobuf drops a zero index, so "No" (item 0) arrives as undefined: anything unclear is a no.
-  const yes = ev.currentSelectItemName ? ev.currentSelectItemName === 'Yes' : ev.currentSelectItemIndex === 1
+  const pressed = Date.now()
+  // protobuf drops a zero index, so the first item arrives as undefined: anything unclear declines.
+  const yes = ev.currentSelectItemName ? ev.currentSelectItemName === choices(card)[1] : ev.currentSelectItemIndex === 1
   await stopListening()
   answering = true
   try {
-    await api.answer(card.id, yes)
-  } catch {
-    // the next poll shows the server state either way
+    await answerCard(card, yes, pressed, () => api.answer(card.id, yes))
   } finally {
     answering = false
   }
@@ -155,6 +174,7 @@ async function choose(ev: { currentSelectItemIndex?: number; currentSelectItemNa
 async function sendVoice() {
   if (mic !== 'on') return
   mic = 'sending'
+  const ended = Date.now()
   clearTimeout(listenTimer)
   const b = bridge
   if (b) await serial(() => b.audioControl(false))
@@ -173,9 +193,11 @@ async function sendVoice() {
     try {
       const r = card ? await api.confirm(pcm, card) : await api.voice(pcm, state?.markets[focus]?.key ?? '')
       asked = !card && r.ok
-      note('', 0) // the server's toast says what it heard
+      if (asked) spoke = true
+      if (card) note(timed(r.message, ended))
+      else note('', 0) // the server's toast says what it heard
     } catch (e) {
-      note(`Voice: ${(e as Error).message}`)
+      note((e as Error).message)
     }
   }
   mic = 'off'
@@ -234,7 +256,7 @@ async function startGlasses() {
   }
   shown = renderScreen(null, focus, offline)
   pageCard = null // starts on the market page; the first poll switches to a card page if one is waiting
-  const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page(shown, false)))
+  const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page(shown, null)))
   $('glasses').textContent = result === 0 ? 'Glasses: connected' : `Glasses: display error ${result}`
   bridge.onEvenHubEvent(e => void onEvent(e))
 }

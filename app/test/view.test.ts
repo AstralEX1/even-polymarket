@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { renderScreen, timeLeft, wrap } from '../src/view.ts'
+import { choices, renderScreen, timeLeft, wrap } from '../src/view.ts'
 import type { SessionState } from '../../server/src/types.ts'
 
 const NOW = 1_800_000_000_000
@@ -18,42 +18,57 @@ const base: SessionState = {
   card: null, pending: 0, toast: null, error: null, updatedAt: NOW,
 }
 
-// The glasses font: ASCII, Latin-1, arrows and the box-drawing line.
-const ALLOWED = /^[\x20-\x7e\xa0-\xff←↑→↓─\n]*$/
+// The glasses font: ASCII, Latin-1, arrows and the shapes it draws (no check mark, no emoji).
+const ALLOWED = /^[\x20-\x7e\xa0-\xff←↑→↓─│●○▲▼█▒\n]*$/
 
-test('the market screen: one percentage per side, your bet in money, today against the limit', () => {
+test('the market screen: the game, one number, your bet in money; nothing else until it matters', () => {
   const text = renderScreen(base, 0, false, '', NOW)
   assert.equal(text, [
-    'KC vs BUF · starts in 3h 5m · 1/2',
-    'KC  58%  ↑12  · HL 51%', // Hyperliquid shows: 7 points off the live odds
-    'BUF  42%  ↓12  · HL 49%',
-    'You: 20 KC  +$1.20 · pays $20 if KC wins',
-    'Today +$1.20 of $50 limit',
-    'tap: speak · scroll: next',
+    'KC vs BUF · starts in 3h 5m   ● ○', // page dots: first of two markets
+    'KC 58%  ▲12', // the side you hold, at the live odds; BUF is 100 minus it, Hyperliquid's mid shows on the bet card
+    '███████▒▒▒▒▒', // 58% as a length
+    'You +$1.20 on 20 KC · pays $20',
   ].join('\n'))
   assert.match(text, ALLOWED)
-  const close = { ...base.markets[0], sides: [{ ...base.markets[0].sides[0], hl: 0.57 }, { ...base.markets[0].sides[1], hl: 0.43 }] } as typeof base.markets[0]
-  assert.match(renderScreen({ ...base, markets: [close] }, 0, false, '', NOW), /\nKC  58%  ↑12\nBUF  42%  ↓12\n/) // 1 point off: one number
+  // Holding nothing, the favourite leads.
+  const none = { ...base.markets[0], holdings: [], sides: [{ ...base.markets[0].sides[0], pm: 0.3 }, { ...base.markets[0].sides[1], pm: 0.7 }] } as typeof base.markets[0]
+  assert.match(renderScreen({ ...base, markets: [none] }, 0, false, '', NOW), /^KC vs BUF · starts in 3h 5m\nBUF 70%  ▼12\n████████▒▒▒▒$/)
+})
+
+test('the how-to line teaches by example until the first spoken bet; the limit shows once half of it is gone', () => {
+  assert.match(renderScreen(base, 0, false, '', NOW, true), /\nTap and say "20 on KC"$/)
+  assert.doesNotMatch(renderScreen(base, 0, false, '', NOW, false), /Tap and say/)
+  assert.doesNotMatch(renderScreen({ ...base, dayPnl: -24 }, 0, false, '', NOW), /limit/)
+  assert.match(renderScreen({ ...base, dayPnl: -25 }, 0, false, '', NOW, true), /\nToday -\$25.00 of \$50 limit$/) // the warning takes the how-to's place
 })
 
 test('scroll focus picks the market; without Polymarket the Hyperliquid mid is the live price', () => {
   const text = renderScreen(base, 1, false, '', NOW)
-  assert.match(text, /^BTC >= 60,393 · ends in 1h 30m · 2\/2\n/)
+  assert.match(text, /^BTC >= 60,393 · ends in 1h 30m   ○ ●\n/)
   const live = renderScreen({ ...base, markets: [{ ...base.markets[0], startsAt: NOW - 60_000 }] }, 0, false, '', NOW)
   assert.match(live, /^KC vs BUF\n/) // a game on shows no deadline
-  assert.match(text, /\nYes  50%\n/)
+  assert.match(text, /\nYes 50%\n██████▒▒▒▒▒▒$/)
 })
 
-test('a card says the decision in money first, then why; NO / YES is the list beside it', () => {
+test('a card says the decision in money first, then why; its two actions name what they do, the safe one first', () => {
   const card = { id: 'c', key: 'k', title: 'KC vs BUF: KC now 58%', question: 'Buy 39 KC for $19.89? Pays $39 if KC wins',
     action: { type: 'buy' as const, market: '27159', sideIndex: 0, sideName: 'KC', coin: '#271590', asset: 100271590, shares: 39, price: 0.51 }, expiresAt: NOW + 30_000 }
   const text = renderScreen({ ...base, card, pending: 2 }, 0, false, '', NOW)
   assert.equal(text, ['Buy 39 KC for $19.89? Pays $39 if KC wins', 'KC vs BUF: KC now 58%', '+1 more'].join('\n'))
+  assert.deepEqual(choices(card), ['Not now', 'Buy 39 KC'])
+  assert.deepEqual(choices({ ...card, action: { ...card.action, type: 'sell', shares: 20 } }), ['Keep', 'Cash out 20 KC'])
+})
+
+test("the app's note replaces the server toast it repeats, so a result shows once", () => {
+  const s = { ...base, toast: 'Bought 39 KC for $19.89' }
+  assert.match(renderScreen(s, 0, false, 'Bought 39 KC for $19.89 · 1.4 s', NOW), /\nBought 39 KC for \$19.89 · 1.4 s$/)
+  assert.equal(renderScreen(s, 0, false, 'Bought 39 KC for $19.89 · 1.4 s', NOW).split('Bought').length, 2)
+  assert.match(renderScreen(s, 0, false, 'Listening...', NOW), /\nBought 39 KC for \$19.89\nListening\.\.\.$/)
 })
 
 test('lock, cool-down, stale data and offline are said plainly', () => {
-  assert.match(renderScreen({ ...base, locked: true }, 0, false, '', NOW), /LOCKED: daily loss limit/)
-  assert.match(renderScreen({ ...base, coolDownUntil: NOW + 7 * 60_000 }, 0, false, '', NOW), /COOL-DOWN 7 min/)
+  assert.match(renderScreen({ ...base, locked: true }, 0, false, '', NOW), /Locked: daily loss limit/)
+  assert.match(renderScreen({ ...base, coolDownUntil: NOW + 7 * 60_000 }, 0, false, '', NOW), /Cool-down 7 min/)
   assert.match(renderScreen({ ...base, error: 'No fresh data for 12s' }, 0, false, '', NOW), /^! No fresh data for 12s\n/) // on top, only when wrong
   assert.equal(renderScreen(null, 0, true, '', NOW), 'Server offline. Retrying...')
   assert.match(renderScreen({ ...base, markets: [] }, 0, false, '', NOW), /No markets/)
