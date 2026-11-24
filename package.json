@@ -1,0 +1,29 @@
+{
+  "name": "glance-odds",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "server": "node --env-file-if-exists=.env server/src/main.ts",
+    "dev": "vite --config app/vite.config.ts",
+    "sim": "evenhub-simulator http://localhost:5174",
+    "test": "node --test server/test/*.test.ts app/test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build --config app/vite.config.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "^0.0.16",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.2.0",
+    "@evenrealities/evenhub-simulator": "^0.9.5",
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vite": "^5.4.21"
+  }
+}
