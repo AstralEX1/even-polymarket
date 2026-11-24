@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import type { Config, SessionState, ShownConfig } from '../../server/src/types.ts'
+import type { Config, Game, SessionState, ShownConfig } from '../../server/src/types.ts'
 
 // A packed app gets the tunnel address from PUBLIC_URL at build time: on the phone, localhost is the phone itself.
 export const DEFAULT_SERVER: string = import.meta.env.PUBLIC_URL || 'http://localhost:8788'
@@ -40,6 +40,7 @@ export const getState = () => request<SessionState>('GET', '/api/state')
 export const answer = (cardId: string, yes: boolean) => request<{ ok: boolean; message: string }>('POST', '/api/answer', { cardId, yes })
 export const getConfig = () => request<ShownConfig>('GET', '/api/config')
 export const putConfig = (c: Config) => request<ShownConfig>('PUT', '/api/config', c)
+export const getGames = () => request<Game[]>('GET', '/api/games')
 export const voice = (pcm: Uint8Array, market: string) =>
   request<{ heard: string; ok: boolean; message: string }>('POST', `/api/voice?market=${encodeURIComponent(market)}`, pcm, VOICE_TIMEOUT_MS)
 /** A spoken "yes" or "no" to one card. */

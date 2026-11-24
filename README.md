@@ -8,9 +8,9 @@ Live odds and your bet on Even Realities G2 glasses. Polymarket gives the live o
 G2 glasses ──BLE── Even app WebView (app/)  ──HTTP + Bearer──▶  server/ (Node 22, no framework)
   text page / card + No|Yes list               GET  /api/state           ├─ session.ts  tick every 2 s, and within 0.5 s of an odds move: markets, mids, account, odds → rules → cards
   mic PCM 16 kHz → endpointer                  POST /api/answer          ├─ rules.ts    swing / cash-out cards, limits, equity
-  phone page: server, token, limits            POST /api/voice           ├─ hyperliquid.ts  testnet /info + signed /exchange (IOC limit)
-                                               GET|PUT /api/config       ├─ sign.ts     L1 action signing (msgpack + keccak + secp256k1)
-                                                                         ├─ polymarket.ts   Gamma slug → CLOB midpoint
+  phone page: games, limits, server           POST /api/voice           ├─ hyperliquid.ts  testnet /info + signed /exchange (IOC limit)
+                                               GET|PUT /api/config, GET /api/games ├─ sign.ts     L1 action signing (msgpack + keccak + secp256k1)
+                                                                         ├─ polymarket.ts   Gamma slug → CLOB midpoint; game → slug by kick-off
                                                                          ├─ feed.ts     Polymarket market websocket: live books
                                                                          ├─ tape.ts     record live ticks, replay them (VENUE=replay)
                                                                          ├─ stt.ts      OpenAI gpt-4o-mini-transcribe (optional)
@@ -35,7 +35,7 @@ npm run dev                 # app on :5174
 npm run sim                 # Even Hub simulator → http://localhost:5174
 ```
 
-On the phone page, set the server to `http://localhost:8788` and the token to `APP_TOKEN`.
+On the phone page, set the server to `http://localhost:8788` and the token to `APP_TOKEN`, then tap the games to put on the glasses. The list is every testnet game that starts within a week (`GET /api/games`), each matched to Polymarket by kick-off minute and team names. A game with no match shows Hyperliquid's own prices. Ids can still be typed under More.
 
 Live testnet: set `VENUE=hyperliquid`, `HL_ACCOUNT` (your testnet address) and `HL_AGENT_KEY` (from app.hyperliquid-testnet.xyz/API). Voice needs `OPENAI_API_KEY`. Polymarket odds stream over its market websocket (`feed.ts`); REST answers only while the socket has no book.
 

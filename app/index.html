@@ -2,68 +2,127 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Sideline Odds</title>
   <style>
-    :root { color-scheme: dark; --bg: #0d0f0e; --card: #161a18; --line: #2a302d; --text: #e6ece8; --muted: #8b958f; --accent: #5fe08a; }
-    * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 -apple-system, system-ui, sans-serif; padding: 16px; }
-    h1 { font-size: 20px; margin: 0 0 4px; }
-    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 20px 0 8px; }
-    section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
-    label { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; }
-    label span { color: var(--muted); }
-    input, textarea { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font: inherit; }
-    input { width: 9em; text-align: right; }
-    #server, #token { width: 100%; text-align: left; }
-    textarea { width: 100%; min-height: 5.5em; font-family: ui-monospace, monospace; font-size: 13px; }
-    button { margin-top: 10px; width: 100%; padding: 12px; border: 0; border-radius: 10px; background: var(--accent); color: #062010; font: 600 15px system-ui; }
-    pre { margin: 0; white-space: pre-wrap; color: var(--accent); font: 13px/1.35 ui-monospace, monospace; min-height: 10em; }
-    .muted { color: var(--muted); font-size: 13px; }
-    #message { min-height: 1.4em; margin-top: 8px; }
+    /* Even app tokens (dark): the page sits inside the Even app, so it looks like it. Glasses green stays on the glasses. */
+    :root {
+      color-scheme: dark;
+      --bg: #111111; --surface: #1a1a1a; --line: rgba(255, 255, 255, 0.08); --input: rgba(255, 255, 255, 0.08);
+      --text: #ffffff; --dim: #8a8a8a; --accent: #fef991; --danger: #ff6b5e;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      margin: 0; padding: 20px 20px calc(32px + env(safe-area-inset-bottom)); background: var(--bg); color: var(--text);
+      font: 400 16px/1.4 "FK Grotesk Neue", system-ui, -apple-system, sans-serif; letter-spacing: -0.01em;
+    }
+    h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+    h2 { font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dim); margin: 32px 16px 8px; }
+    .status { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 13px; margin: 4px 0 0; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+    body[data-online="true"] .dot { background: var(--accent); }
+    body[data-online="false"] .dot { background: var(--danger); }
+
+    /* What the glasses show right now: black like the lens, white like lit pixels. */
+    pre {
+      margin: 16px 0 0; padding: 16px; min-height: 7.5em; border-radius: 16px; background: #000; color: #e8e8e8;
+      font: 13px/1.45 ui-monospace, "SF Mono", monospace; white-space: pre-wrap; letter-spacing: 0;
+    }
+
+    .group { background: var(--surface); border-radius: 16px; overflow: hidden; }
+    .row {
+      display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 10px 16px; border: 0; margin: 0;
+      background: none; color: inherit; font: inherit; text-align: left; letter-spacing: inherit;
+    }
+    .row + .row { box-shadow: inset 16px 1px 0 var(--surface), inset 0 1px 0 var(--line); } /* inset separator */
+    button.row:active { background: rgba(255, 255, 255, 0.06); transition: none; }
+    button.row { transition: background 200ms ease-out; cursor: pointer; }
+    .row .text { flex: 1; min-width: 0; }
+    .row .title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row .sub { display: block; font-size: 13px; color: var(--dim); }
+    .check { width: 22px; color: var(--accent); font-size: 18px; text-align: center; visibility: hidden; }
+    .row[aria-pressed="true"] .check { visibility: visible; }
+    .live { color: var(--accent); }
+
+    label.row span:first-child { flex: 1; }
+    .money { display: flex; align-items: center; gap: 2px; color: var(--dim); }
+    input, textarea {
+      background: var(--input); color: var(--text); border: 0; border-radius: 10px; padding: 8px 10px; font: inherit; letter-spacing: 0;
+    }
+    input[type="number"] { width: 5.5em; text-align: right; }
+    input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .stack { display: grid; gap: 8px; padding: 16px; }
+    textarea { width: 100%; min-height: 5.5em; font: 13px/1.4 ui-monospace, monospace; }
+    .button {
+      width: 100%; padding: 14px; border: 0; border-radius: 12px; background: var(--accent); color: #111;
+      font: 600 16px system-ui, sans-serif; cursor: pointer;
+    }
+    .button:active { opacity: 0.8; }
+    .note { font-size: 13px; color: var(--dim); margin: 8px 16px 0; }
+    #message { min-height: 1.4em; }
+    #message.error { color: var(--danger); }
+    details > summary { list-style: none; cursor: pointer; }
+    details > summary::-webkit-details-marker { display: none; }
+    details > summary .chev { color: var(--dim); transition: transform 200ms ease-out; }
+    details[open] > summary .chev { transform: rotate(90deg); }
     a { color: var(--accent); }
+    [hidden] { display: none !important; }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
   </style>
 </head>
 <body>
   <h1>Sideline Odds</h1>
-  <div class="muted"><span id="status">Connecting...</span> · <span id="glasses">Glasses: waiting</span></div>
+  <p class="status"><span class="dot"></span><span id="status">Connecting...</span><span id="glasses"></span></p>
 
-  <h2>On the glasses</h2>
-  <section><pre id="preview"></pre></section>
+  <pre id="preview" aria-label="What the glasses show"></pre>
 
-  <h2>Server</h2>
-  <section>
-    <input id="server" placeholder="http://localhost:8788" autocomplete="off" />
-    <input id="token" type="password" placeholder="APP_TOKEN" autocomplete="off" style="margin-top:8px" />
-    <button id="connect">Connect</button>
-  </section>
+  <div id="pair">
+    <h2>Your server</h2>
+    <div class="group" id="server-group">
+      <div class="stack">
+        <input id="server" placeholder="https://your-tunnel.example" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Server address" />
+        <input id="token" type="password" placeholder="Token" autocomplete="off" aria-label="Token" />
+        <button class="button" id="connect">Connect</button>
+      </div>
+    </div>
+  </div>
 
-  <h2>Markets</h2>
-  <section>
-    <textarea id="markets" placeholder="27159 nfl-kc-buf-2026-11-27&#10;daily:BTC"></textarea>
-    <div class="muted">One per line: a Hyperliquid testnet outcome id (or daily:BTC), then optionally the Polymarket slug or link for live odds. Scroll on the glasses to switch.</div>
-  </section>
+  <h2>Games</h2>
+  <div class="group" id="games" role="list"></div>
+  <p class="note">Tap a game to put it on the glasses, tap again to take it off. Scroll on the glasses to switch.</p>
 
   <h2>Limits</h2>
-  <section>
-    <label><span>Max per bet, $</span><input id="maxBetUsd" type="number" min="1" inputmode="decimal" /></label>
-    <label><span>Bet when you say no amount, $</span><input id="defaultBetUsd" type="number" min="1" inputmode="decimal" /></label>
-    <label><span>Daily loss limit, $</span><input id="dailyLossLimitUsd" type="number" min="1" inputmode="decimal" /></label>
-    <label><span>Cool-down after a loss, min</span><input id="coolDownMin" type="number" min="1" inputmode="numeric" /></label>
-    <label><span>Refuse YES if the price moved, cents</span><input id="slippagePts" type="number" min="1" max="20" inputmode="numeric" /></label>
-    <div class="muted">Lower limits count at once. Higher ones start 24 hours after you save them.</div>
-  </section>
+  <div class="group">
+    <label class="row"><span>Most per bet</span><span class="money">$<input id="maxBetUsd" type="number" min="1" inputmode="decimal" /></span></label>
+    <label class="row"><span>Daily loss limit</span><span class="money">$<input id="dailyLossLimitUsd" type="number" min="1" inputmode="decimal" /></span></label>
+  </div>
+  <p class="note" id="message" role="status">Lower limits apply at once. Higher ones start 24 hours after you set them.</p>
 
-  <h2>Cash-out cards</h2>
-  <section>
-    <label><span>Odds moved by, cents</span><input id="swingPts" type="number" min="1" max="99" inputmode="numeric" /></label>
-    <label><span>... within, min</span><input id="swingMin" type="number" min="1" inputmode="numeric" /></label>
-    <label><span>Your side reached, cents</span><input id="cashOutAt" type="number" min="1" max="99" inputmode="numeric" /></label>
-    <button id="save">Save</button>
-    <div id="message" class="muted"></div>
-  </section>
+  <details>
+    <summary><h2 style="display:flex;justify-content:space-between">More <span class="chev">›</span></h2></summary>
+    <div class="group">
+      <label class="row"><span>Bet when you say no amount</span><span class="money">$<input id="defaultBetUsd" type="number" min="1" inputmode="decimal" /></span></label>
+      <label class="row"><span>Pause after a losing cash-out, min</span><input id="coolDownMin" type="number" min="1" inputmode="numeric" /></label>
+      <label class="row"><span>Refuse if the price moved, points</span><input id="slippagePts" type="number" min="1" max="20" inputmode="numeric" /></label>
+    </div>
+    <h2>Cash-out cards</h2>
+    <div class="group">
+      <label class="row"><span>Odds moved by, points</span><input id="swingPts" type="number" min="1" max="99" inputmode="numeric" /></label>
+      <label class="row"><span>… within, min</span><input id="swingMin" type="number" min="1" inputmode="numeric" /></label>
+      <label class="row"><span>Your side reached, %</span><input id="cashOutAt" type="number" min="1" max="99" inputmode="numeric" /></label>
+    </div>
+    <h2>Markets by id</h2>
+    <div class="group">
+      <div class="stack">
+        <textarea id="markets" placeholder="27159 nfl-kc-buf-2026-11-27&#10;daily:BTC" aria-label="Markets, one per line"></textarea>
+        <button class="button" id="save">Save markets</button>
+      </div>
+    </div>
+    <p class="note">One per line: a Hyperliquid testnet outcome id (or daily:BTC), then a Polymarket slug or link for live odds.</p>
+    <div id="more-server"><h2>Server</h2></div>
+  </details>
 
-  <p class="muted">Hyperliquid testnet only: no real money. Every card comes from your words or your rules, not advice. If betting stops being fun, free help is at <a href="https://www.gamblingtherapy.org">gamblingtherapy.org</a>.</p>
+  <p class="note" style="margin-top:32px">Hyperliquid testnet only: no real money. The mic listens only after you tap; your server holds the keys, which cannot withdraw. Every card comes from your words or your rules, not advice. If betting stops being fun, free help is at <a href="https://www.gamblingtherapy.org">gamblingtherapy.org</a>.</p>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
