@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { choices, renderScreen, timeLeft, wrap } from '../src/view.ts'
+import { measureTextWrap, pxTruncate } from '@evenrealities/pretext'
+import { CARD_LINES, CARD_TEXT_HEIGHT, choices, LIST_ITEM_PX, MIC, PADDING, PAGE_LINES, renderScreen, timeLeft, wrap } from '../src/view.ts'
 import type { SessionState } from '../../server/src/types.ts'
 
 const NOW = 1_800_000_000_000
@@ -20,6 +21,14 @@ const base: SessionState = {
 
 // The glasses font: ASCII, Latin-1, arrows and the shapes it draws (no check mark, no emoji).
 const ALLOWED = /^[\x20-\x7e\xa0-\xff←↑→↓─│●○▲▼█▒\n]*$/
+
+// font-measurement guide: inner box = size - 2 * (padding + border), 27 px a line, 40 px a list item, 12 px item padding a side.
+const lines = (text: string) => measureTextWrap(text, 576 - 2 * PADDING).lineCount
+const card = {
+  id: 'c', key: 'k', title: 'Will the Kansas City Chiefs beat the Buffalo Bills by more than 7 points in the AFC final? KC now 58%',
+  question: 'Buy 166 South Africa for $14.94? Pays $166 if South Africa wins the 2026 World Cup final',
+  action: { type: 'buy' as const, market: '27159', sideIndex: 0, sideName: 'South Africa', coin: '#271590', asset: 100271590, shares: 166, price: 0.09 }, expiresAt: NOW + 30_000,
+}
 
 test('the market screen: the game, one number, your bet in money; nothing else until it matters', () => {
   const text = renderScreen(base, 0, false, '', NOW)
@@ -81,12 +90,52 @@ test('timeLeft', () => {
   assert.equal(timeLeft(-1), 'ended')
 })
 
-test('long lines wrap at a space and keep their end; odd characters are cleaned', () => {
-  const q = 'Buy 166 South Africa at 0.09 ($14.94), pays $166?'
-  assert.deepEqual(wrap(q), ['Buy 166 South Africa at 0.09 ($14.94), pays', '$166?'])
-  assert.deepEqual(wrap('x'.repeat(50)), ['x'.repeat(46), 'xxxx'])
+test('long lines wrap at a space and keep their end, at the font width; odd characters are cleaned', () => {
+  const q = 'Buy 166 South Africa for $14.94? Pays $166 if South Africa wins the 2026 World Cup final'
+  assert.deepEqual(wrap(q), ['Buy 166 South Africa for $14.94? Pays $166 if South Africa wins', 'the 2026 World Cup final'])
+  assert.deepEqual(wrap('x'.repeat(60)), ['x'.repeat(51), 'x'.repeat(9)])
   const text = renderScreen({ ...base, toast: 'Say it like “20 on KC”… 🙂' }, 0, false, '', NOW)
   assert.match(text, /Say it like "20 on KC"\.\.\. $/)
   assert.match(text, ALLOWED)
-  for (const line of text.split('\n')) assert.ok(line.length <= 46, line)
+  for (const line of text.split('\n')) assert.equal(lines(line), 1, line)
+})
+
+test('the boxes hold 10 lines (market page) and 6 (card text); the two list items fit under the card', () => {
+  assert.equal(PAGE_LINES, 10)
+  assert.equal(CARD_LINES, 6)
+  assert.ok(2 * LIST_ITEM_PX <= 288 - CARD_TEXT_HEIGHT - 2 * PADDING)
+})
+
+test('a full card keeps its question whole: the toast goes first, then the app note, then "+N more", then the title', () => {
+  const s = { ...base, card, pending: 3, toast: 'Heard "20 on South Africa"' }
+  const fit = (t: string) => { assert.ok(lines(t) <= CARD_LINES, t); assert.ok(t.includes(wrap(card.question).join('\n')), t); return t }
+  const roomy = fit(renderScreen(s, 0, false, `${MIC} Say "yes" or "no"`, NOW))
+  assert.doesNotMatch(roomy, /Heard/)
+  assert.match(roomy, /\n\+2 more\n● Say "yes" or "no"$/)
+  const crowded = fit(renderScreen({ ...s, error: 'No fresh data for 12s' }, 0, true, `${MIC} Say "yes" or "no"`, NOW))
+  assert.doesNotMatch(crowded, /Heard|Say "yes"|\+2 more/)
+  assert.match(crowded, /Kansas City/)
+  const worst = fit(renderScreen({ ...s, error: 'No fresh data for 12s from Hyperliquid testnet and none from Polymarket either' }, 0, true, 'x', NOW))
+  assert.doesNotMatch(worst, /Kansas City/)
+})
+
+test('a full market page stays inside its box (no firmware scroll): the how-to goes first, then the toast', () => {
+  const m = { ...base.markets[0], title: 'Will the Kansas City Chiefs beat the Buffalo Bills by more than 7 points in the AFC final?',
+    holdings: [{ sideIndex: 0, shares: 20, cost: 9, value: 10.2 }, { sideIndex: 1, shares: 166, cost: 14.94, value: 9.1 }] }
+  const s = { ...base, markets: [m, base.markets[1]], error: 'No fresh data for 12s', toast: 'KC vs BUF ends in 5 min' }
+  const text = renderScreen(s, 0, true, `${MIC} Listening`, NOW, true)
+  assert.ok(lines(text) <= PAGE_LINES, text)
+  assert.doesNotMatch(text, /Tap and say/)
+  assert.match(text, /You -\$5\.84 on 166 BUF · pays \$166\nKC vs BUF ends in 5 min\n● Listening$/)
+  const locked = renderScreen({ ...s, locked: true }, 0, true, `${MIC} Listening`, NOW, true)
+  assert.ok(lines(locked) <= PAGE_LINES, locked)
+  assert.match(locked, /\nLocked: daily loss limit\. Cash-outs only\.\n● Listening$/)
+})
+
+test('a list item fits the width it shows, within 64 characters', () => {
+  const [, act] = choices({ ...card, action: { ...card.action, type: 'sell', sideName: 'Democratic Republic of the Congo national team' } })
+  assert.equal(act, pxTruncate(act, 288 - 2 * PADDING - 2 * 12))
+  assert.match(act, /^Cash out 166 Democratic .*\.\.\.$/)
+  assert.ok(act.length <= 64)
+  assert.deepEqual(choices(card), ['Not now', 'Buy 166 South Africa'])
 })

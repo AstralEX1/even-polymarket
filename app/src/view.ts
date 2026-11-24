@@ -1,7 +1,17 @@
+import { getTextWidth, pxTruncate } from '@evenrealities/pretext'
 import type { Card, MarketView, SessionState, SideView } from '../../server/src/types.ts'
 import { money, pct, usd } from '../../server/src/format.ts'
 
-const WIDTH = 46
+// The glasses page (main.ts): 576 x 288; its text boxes have padding 4 and no border; a card's text sits above its list.
+export const PADDING = 4
+export const CARD_TEXT_HEIGHT = 176
+const LINE_PX = 27 // the firmware font's fixed line height
+export const LIST_ITEM_PX = 40 // and a list item's
+const TEXT_PX = 576 - 2 * PADDING // a box's inner width: width - 2 * (padding + border)
+const ITEM_PX = 288 - 2 * PADDING - 2 * 12 // a list item's text: the list's inner width less the item's 12 px a side
+/** Lines a box holds. More, and the market page scrolls inside the firmware (other scroll events) and a card's text is cut off. */
+export const PAGE_LINES = Math.floor((288 - 2 * PADDING) / LINE_PX)
+export const CARD_LINES = Math.floor((CARD_TEXT_HEIGHT - 2 * PADDING) / LINE_PX)
 
 /**
  * Characters the glasses font lacks (curly quotes, ellipsis, emoji in a heard phrase or a market title) become plain ones or go.
@@ -19,16 +29,21 @@ export const bar = (p: number) => '█'.repeat(Math.round(p * BAR)) + '▒'.repe
 /** Where you are among several markets, like page dots: ● ○ ○. */
 const dots = (at: number, of: number) => Array.from({ length: of }, (_, i) => (i === at ? '●' : '○')).join(' ')
 
-/** Long lines wrap at a space instead of losing their end (a price, a payout). */
+/** Long lines wrap at a space instead of losing their end (a price, a payout), measured in the glasses font's pixels. */
 export function wrap(s: string): string[] {
   const out: string[] = []
   let line = ''
   for (const word of s.split(' ')) {
     const next = line ? `${line} ${word}` : word
-    if (next.length <= WIDTH) { line = next; continue }
+    if (getTextWidth(next) <= TEXT_PX) { line = next; continue }
     if (line) out.push(line)
     line = word
-    while (line.length > WIDTH) { out.push(line.slice(0, WIDTH)); line = line.slice(WIDTH) }
+    while (getTextWidth(line) > TEXT_PX) {
+      let n = line.length - 1
+      while (n > 1 && getTextWidth(line.slice(0, n)) > TEXT_PX) n--
+      out.push(line.slice(0, n))
+      line = line.slice(n)
+    }
   }
   return [...out, line]
 }
@@ -50,10 +65,13 @@ function sideLine(s: SideView): string {
   return `${s.name} ${pct(p)}${change}`
 }
 
+/** A list item's label, cut to the width the item shows (at 4 px or more a character, that is within the SDK's 64). */
+const item = (s: string) => pxTruncate(plain(s), ITEM_PX)
+
 /** The card's two list items, the safe one first: a stray tap on a new card declines it. They name the action, not Yes / No. */
 export function choices(card: Card): [string, string] {
   const { type, shares, sideName } = card.action
-  return type === 'buy' ? ['Not now', plain(`Buy ${shares} ${sideName}`)] : ['Keep', plain(`Cash out ${shares} ${sideName}`)]
+  return type === 'buy' ? ['Not now', item(`Buy ${shares} ${sideName}`)] : ['Keep', item(`Cash out ${shares} ${sideName}`)]
 }
 
 function when(m: MarketView, now: number): string {
@@ -83,22 +101,26 @@ function marketLines(m: MarketView, at: number, of: number, now: number): string
 /** The limit line shows once half of the day's loss limit is gone: a warning before the lock, not a permanent label. */
 const LIMIT_WARN = 0.5
 
+/** When a box is too full, lines go in this order, lowest rank first and, among equals, the one further down. A card's question never goes. */
+const HINT = 0, TOAST = 1, NOTE = 2, MORE = 3, REST = 4, QUESTION = 5
+type Line = [text: string, rank: number]
+
 // One look: the game, one number, your bet in money. Everything else shows only when it matters.
-function body(s: SessionState, focus: number, now: number, hint: boolean): string[] {
-  const out: string[] = []
-  if (s.error) out.push(`! ${s.error}`) // on top, and only when something is wrong
+function body(s: SessionState, focus: number, now: number, hint: boolean): Line[] {
+  const out: Line[] = []
+  if (s.error) out.push([`! ${s.error}`, REST]) // on top, and only when something is wrong
   if (s.card) {
     // The decision in money first, then why it is up. The two actions are the list under this text.
-    out.push(s.card.question, s.card.title)
-    if (s.pending > 1) out.push(`+${s.pending - 1} more`)
+    out.push([s.card.question, QUESTION], [s.card.title, REST])
+    if (s.pending > 1) out.push([`+${s.pending - 1} more`, MORE])
   } else {
     const m = s.markets[focus]
-    if (!m) out.push('No markets. Add one on the phone page.')
-    else out.push(...marketLines(m, focus, s.markets.length, now))
-    if (s.locked) out.push('Locked: daily loss limit. Cash-outs only.')
-    else if (s.coolDownUntil > now) out.push(`Cool-down ${Math.ceil((s.coolDownUntil - now) / 60_000)} min: cash-outs only`)
-    else if (s.dayPnl <= -LIMIT_WARN * s.dailyLossLimitUsd) out.push(`Today ${money(s.dayPnl)} of ${usd(s.dailyLossLimitUsd)} limit`)
-    else if (m && hint) out.push(`Tap and say "20 on ${m.sides[heroSide(m)].name}"`) // taught by example, until the first bet you speak
+    if (!m) out.push(['No markets. Add one on the phone page.', REST])
+    else out.push(...marketLines(m, focus, s.markets.length, now).map((l): Line => [l, REST]))
+    if (s.locked) out.push(['Locked: daily loss limit. Cash-outs only.', REST])
+    else if (s.coolDownUntil > now) out.push([`Cool-down ${Math.ceil((s.coolDownUntil - now) / 60_000)} min: cash-outs only`, REST])
+    else if (s.dayPnl <= -LIMIT_WARN * s.dailyLossLimitUsd) out.push([`Today ${money(s.dayPnl)} of ${usd(s.dailyLossLimitUsd)} limit`, REST])
+    else if (m && hint) out.push([`Tap and say "20 on ${m.sides[heroSide(m)].name}"`, HINT]) // taught by example, until the first bet you speak
   }
   return out
 }
@@ -108,10 +130,16 @@ function body(s: SessionState, focus: number, now: number, hint: boolean): strin
  * `voice` is the app's own note (listening, sending, a result with its time); the server's toast it repeats is not shown twice.
  */
 export function renderScreen(s: SessionState | null, focus: number, offline: boolean, voice = '', now = Date.now(), hint = false): string {
-  const out = offline ? ['Server offline. Retrying...'] : []
+  const out: Line[] = offline ? [['Server offline. Retrying...', REST]] : []
   if (s) out.push(...body(s, focus, now, hint))
-  else if (!offline) out.push('Connecting...')
-  if (s?.toast && !voice.startsWith(s.toast)) out.push(s.toast)
-  if (voice) out.push(voice)
-  return out.flatMap(l => wrap(plain(l))).join('\n')
+  else if (!offline) out.push(['Connecting...', REST])
+  if (s?.toast && !voice.startsWith(s.toast)) out.push([s.toast, TOAST])
+  if (voice) out.push([voice, NOTE])
+  const parts = out.map(([text, rank]) => ({ lines: wrap(plain(text)), rank }))
+  const size = () => parts.reduce((n, p) => n + p.lines.length, 0)
+  const room = s?.card ? CARD_LINES : PAGE_LINES
+  for (let rank = HINT; rank < QUESTION; rank++) {
+    for (let i = parts.length - 1; i >= 0 && size() > room; i--) if (parts[i].rank === rank) parts.splice(i, 1)
+  }
+  return parts.flatMap(p => p.lines).join('\n')
 }

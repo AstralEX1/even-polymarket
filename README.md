@@ -70,8 +70,8 @@ CI (`.github/workflows/ci.yml`) runs typecheck, tests and pack on every push to 
 |---|---|
 | `server/src` | session, rules, venue (Hyperliquid), odds (Polymarket), HTTP, STT, config and limits |
 | `server/test` | unit tests with fake fetch and clock; signing vectors from the Hyperliquid Python SDK |
-| `app/src` | glasses UI (`main.ts`, `view.ts`), voice end-pointing (`endpoint.ts`), API client |
-| `app/test` | render limits, endpointer, market parsing |
+| `app/src` | glasses UI (`main.ts`, `view.ts`), exit dialogue (`exit.ts`), voice end-pointing (`endpoint.ts`), API client |
+| `app/test` | render limits, exit dialogue, endpointer, market parsing |
 | `docs/screenshots` | simulator frames |
 
 ## Known limitations
@@ -80,5 +80,4 @@ CI (`.github/workflows/ci.yml`) runs typecheck, tests and pack on every push to 
 - The day boundary uses the server's time zone, which is correct while the server runs on the user's machine.
 - Resolving a lost reply assumes this machine's clock is at most 2 s ahead of Hyperliquid's (`EXPIRY_MARGIN_MS`).
 - Speech end-pointing uses a fixed noise-floor ratio and is not tuned on real glasses.
-- Settings live in WebView `localStorage`.
 - The default market (`27159`, KC vs BUF, 27 Nov 2026) expires. `daily:BTC` rolls over by itself.

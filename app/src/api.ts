@@ -8,18 +8,36 @@ const VOICE_TIMEOUT_MS = 20_000 // upload plus transcription
 // Dev server only: in a build DEV is false and the bundler drops the token.
 const devToken: string = import.meta.env.DEV ? import.meta.env.VITE_APP_TOKEN ?? '' : ''
 
-// shortcut: WebView localStorage; move to the SDK's bridge storage if the Even app drops it between launches.
-const read = (key: string) => { try { return localStorage.getItem(key) } catch { return null } }
+// The Even WebView drops localStorage between launches (even-g2-notes, device-apis.md), so the Even app's own storage is the saved copy.
+// Reads stay synchronous from `mem`; a plain browser (dev) keeps using localStorage.
+const KEYS = ['go.server', 'go.token']
+const mem = new Map<string, string>()
+for (const k of KEYS) { try { const v = localStorage.getItem(k); if (v) mem.set(k, v) } catch { /* blocked */ } }
+const saved = new Set<string>() // saved on this launch, so newer than the Even app's copy
+let persist: (key: string, value: string) => void = () => {}
 
 export function getSettings() {
-  return { server: read('go.server') || DEFAULT_SERVER, token: read('go.token') || devToken }
+  return { server: mem.get('go.server') || DEFAULT_SERVER, token: mem.get('go.token') || devToken }
+}
+
+/** Reads what the Even app saved and sends later saves there. True when that changed what getSettings gives. */
+export async function loadSettings(read: (key: string) => Promise<string | undefined>, write: (key: string, value: string) => void): Promise<boolean> {
+  const before = JSON.stringify(getSettings())
+  for (const k of KEYS) { const v = await read(k).catch(() => undefined); if (v && !saved.has(k)) mem.set(k, v) }
+  persist = write
+  for (const k of saved) write(k, mem.get(k) ?? '') // a Connect pressed before the load finished wins
+  return JSON.stringify(getSettings()) !== before
 }
 
 export function saveSettings(server: string, token: string) {
-  try {
-    localStorage.setItem('go.server', server.replace(/\/+$/, ''))
-    localStorage.setItem('go.token', token)
-  } catch { /* storage blocked: settings last until reload */ }
+  const set = (k: string, v: string) => {
+    mem.set(k, v)
+    saved.add(k)
+    persist(k, v)
+    try { localStorage.setItem(k, v) } catch { /* blocked: the copy in memory lasts until reload */ }
+  }
+  set('go.server', server.replace(/\/+$/, ''))
+  set('go.token', token)
 }
 
 async function request<T>(method: string, path: string, body?: unknown, timeoutMs = TIMEOUT_MS): Promise<T> {
