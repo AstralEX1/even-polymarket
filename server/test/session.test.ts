@@ -25,21 +25,21 @@ function setup(over: Partial<Config> = {}, stored: DayState | null = null, start
 test('a voice bet queues a card at the ask; YES buys with the limit capped at ask + slippage', async () => {
   const t = setup()
   await t.s.tick()
-  const v = await t.s.voice('Ten on KC.', '27159')
-  assert.deepEqual(v, { ok: true, message: 'Heard "Ten on KC."' })
+  const v = await t.s.voice('Fifteen on KC.', '27159')
+  assert.deepEqual(v, { ok: true, message: 'Heard "Fifteen on KC."' })
   const card = t.s.state().card!
   assert.equal(card.title, 'KC vs BUF: KC now 50%')
-  assert.equal(card.question, 'Buy 18 KC for $9.18? Pays $18 if KC wins') // 18 × 0.53 worst fill stays within $10
+  assert.equal(card.question, 'Buy 28 KC for $14.28? Pays $28 if KC wins') // 28 × 0.53 worst fill stays within $15
   assert.deepEqual(t.venue.calls, []) // nothing runs before YES
   const r = await t.s.answer(card.id, true)
-  assert.deepEqual(r, { ok: true, message: 'Bought 18 KC for $9.18' })
-  assert.deepEqual(t.venue.calls, [{ asset: 100271590, side: 'Buy', shares: 18, limit: 0.53 }])
+  assert.deepEqual(r, { ok: true, message: 'Bought 28 KC for $14.28' })
+  assert.deepEqual(t.venue.calls, [{ asset: 100271590, side: 'Buy', shares: 28, limit: 0.53 }])
 })
 
 test('NO skips; a second tap on the same card gets "Card is gone"', async () => {
   const t = setup()
   await t.s.tick()
-  await t.s.voice('5 on BUF', '27159')
+  await t.s.voice('15 on BUF', '27159')
   const id = t.s.state().card!.id
   assert.deepEqual(await t.s.answer(id, false), { ok: true, message: 'Skipped' })
   assert.deepEqual(await t.s.answer(id, true), { ok: false, message: 'Card is gone' })
@@ -49,23 +49,32 @@ test('NO skips; a second tap on the same card gets "Card is gone"', async () => 
 test('YES is refused when the price moved past the slippage, when data is stale, or after the card expired', async () => {
   const t = setup()
   await t.s.tick()
-  await t.s.voice('10 on KC', '27159')
+  await t.s.voice('15 on KC', '27159')
   t.venue.midMap[KC] = 0.6
   const moved = await t.s.answer(t.s.state().card!.id, true)
   assert.deepEqual(moved, { ok: false, message: 'Price moved to 61%. Not sent.' })
 
   t.venue.midMap[KC] = 0.5
   await t.s.tick()
-  await t.s.voice('10 on KC', '27159')
+  await t.s.voice('15 on KC', '27159')
   t.advance(11_000) // no tick for 11 s
   assert.deepEqual(await t.s.answer(t.s.state().card!.id, true), { ok: false, message: 'Data is stale. Not sent.' })
 
   await t.s.tick()
-  await t.s.voice('10 on KC', '27159')
+  await t.s.voice('15 on KC', '27159')
   const id = t.s.state().card!.id
   t.advance(31_000)
   assert.deepEqual(await t.s.answer(id, true), { ok: false, message: 'Card expired' })
   assert.deepEqual(t.venue.calls, [])
+})
+
+test('a bet whose whole shares come to under the $10 order minimum makes no card and says what is enough', async () => {
+  const t = setup()
+  await t.s.tick()
+  // 18 × 0.53 = $9.54 at the limit: Hyperliquid would refuse it after the YES
+  assert.deepEqual(await t.s.voice('10 on KC', '27159'), { ok: false, message: 'Under the $10 order minimum. Say $11 or more' })
+  assert.equal(t.s.state().card, null)
+  assert.equal((await t.s.voice('11 on KC', '27159')).ok, true) // 20 × 0.53 = $10.60
 })
 
 test('bets over the cap, an unknown side and talk that is not a bet make no card', async () => {
@@ -92,10 +101,10 @@ test('a losing cash-out starts the cool-down: no new bets, cash-outs still work'
   assert.equal(t.s.state().usdc, 1009.8)
   await t.s.tick()
   assert.ok(t.s.state().coolDownUntil > 0)
-  assert.equal((await t.s.voice('10 on KC', '27159')).message, 'Cool-down: 10 min left')
+  assert.equal((await t.s.voice('15 on KC', '27159')).message, 'Cool-down: 10 min left')
   t.advance(10 * 60_000 + 1)
   await t.s.tick()
-  assert.equal((await t.s.voice('10 on KC', '27159')).ok, true)
+  assert.equal((await t.s.voice('15 on KC', '27159')).ok, true)
 })
 
 test('a lost settlement starts the cool-down, a won one does not, whatever the last mid said', async () => {
@@ -131,14 +140,14 @@ test('the cap holds at the worst fill price, even after the config changes under
 test('the daily loss limit locks new bets until the next day, drops queued bets and survives a restart', async () => {
   const t = setup()
   await t.s.tick()
-  await t.s.voice('10 on KC', '27159')
+  await t.s.voice('15 on KC', '27159')
   assert.ok(t.s.state().card)
   t.venue.acct.usdc -= 60 // lost $60 elsewhere today
   await t.s.tick()
   const st = t.s.state()
   assert.equal(st.locked, true)
   assert.equal(st.card, null) // the bet card is gone
-  assert.match((await t.s.voice('10 on KC', '27159')).message, /^Locked/)
+  assert.match((await t.s.voice('15 on KC', '27159')).message, /^Locked/)
 
   const restarted = createSession(t.venue, t.odds, () => t.cfg, { load: t.saved, save: () => {} }, () => 1_800_000_000_000 + 1)
   await restarted.tick()
@@ -166,18 +175,18 @@ test('a rule card from live odds; Polymarket failure keeps the last price and re
 test('a failed or timed-out order is reported and the card removed', async () => {
   const t = setup()
   await t.s.tick()
-  await t.s.voice('10 on KC', '27159')
+  await t.s.voice('15 on KC', '27159')
   t.venue.failNext = 'Insufficient margin'
   assert.deepEqual(await t.s.answer(t.s.state().card!.id, true), { ok: false, message: 'Failed: Insufficient margin' })
   assert.equal(t.s.state().card, null)
 
-  await t.s.voice('10 on KC', '27159')
+  await t.s.voice('15 on KC', '27159')
   const timeout = new Error('timed out')
   timeout.name = 'TimeoutError'
   t.venue.failNext = timeout
   assert.equal((await t.s.answer(t.s.state().card!.id, true)).message, 'Unknown result: timed out. Check Hyperliquid before betting again.')
 
-  await t.s.voice('10 on KC', '27159')
+  await t.s.voice('15 on KC', '27159')
   const dropped = new Error('fetch failed')
   dropped.name = 'UnknownResult' // the request went out, the reply did not come back
   t.venue.failNext = dropped
@@ -260,15 +269,15 @@ test('Polymarket is asked for all markets at once, and Hyperliquid data counts a
 test('a spoken "yes" buys like a YES tap, "no" skips, and anything else leaves the card up', async () => {
   const t = setup()
   await t.s.tick()
-  await t.s.voice('ten on KC', '27159')
+  await t.s.voice('fifteen on KC', '27159')
   const id = t.s.state().card!.id
   assert.deepEqual(await t.s.confirm('yes, but wait', id), { ok: false, message: 'Heard "yes, but wait". Scroll and tap instead.' })
   assert.equal(t.s.state().card!.id, id) // still up
   assert.deepEqual(await t.s.confirm('Yes.', 'another-card'), { ok: false, message: 'Card is gone' })
-  assert.deepEqual(await t.s.confirm('Yes.', id), { ok: true, message: 'Bought 18 KC for $9.18' })
-  assert.deepEqual(t.venue.calls, [{ asset: 100271590, side: 'Buy', shares: 18, limit: 0.53 }])
+  assert.deepEqual(await t.s.confirm('Yes.', id), { ok: true, message: 'Bought 28 KC for $14.28' })
+  assert.deepEqual(t.venue.calls, [{ asset: 100271590, side: 'Buy', shares: 28, limit: 0.53 }])
 
-  await t.s.voice('5 on BUF', '27159')
+  await t.s.voice('15 on BUF', '27159')
   assert.deepEqual(await t.s.confirm('no thanks', t.s.state().card!.id), { ok: true, message: 'Skipped' })
   assert.equal(t.venue.calls.length, 1)
 })

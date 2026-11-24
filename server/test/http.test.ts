@@ -106,6 +106,7 @@ test('validateConfig checks markets and limits', () => {
   assert.throws(() => v({ markets: [{ key: '1', polymarket: 'Bad Slug' }] }), /slug/)
   assert.throws(() => v({ markets: [{ key: '1' }, { key: '1' }] }), /once/)
   assert.throws(() => v({ defaultBetUsd: 30, maxBetUsd: 25 }), /defaultBetUsd/)
+  assert.throws(() => v({ defaultBetUsd: 5 }), /order minimum/)
   assert.throws(() => v({ cashOutAt: 100 }), /cashOutAt/)
   assert.throws(() => v({ slippagePts: 50 }), /slippagePts/)
   assert.deepEqual(v({ markets: [{ key: 'daily:ETH', extra: 1 }] }).markets, [{ key: 'daily:ETH' }])
@@ -143,5 +144,6 @@ test('a lower limit counts at once, a higher one waits a day', () => {
 test('a short token is refused off loopback', () => {
   assert.match(tokenProblem('short', '0.0.0.0') ?? '', /16/)
   assert.equal(tokenProblem('short', '127.0.0.1'), null)
+  assert.match(tokenProblem('short', '127.0.0.1', 'https://glance.example.ts.net') ?? '', /16/) // a tunnel makes loopback public
   assert.match(tokenProblem('', '127.0.0.1') ?? '', /APP_TOKEN/)
 })

@@ -41,9 +41,11 @@ const spotState = {
 const book = { coin: '#272340', time: 1795334213882, levels: [[{ px: '0.49999', sz: '23.0', n: 2 }], [{ px: '0.51', sz: '3.0', n: 1 }, { px: '0.51999', sz: '20.0', n: 1 }]] }
 
 type Call = { url: URL; body: any; init: RequestInit }
+const CLOID = '0x0000000000000000000000000000beef'
 
 function client(reply: (path: string, body: any) => unknown, now = () => NOW) {
   const calls: Call[] = []
+  const sleeps: number[] = []
   const fetch = (async (input: string | URL, init: RequestInit = {}) => {
     const url = new URL(String(input))
     const body = JSON.parse(String(init.body))
@@ -51,8 +53,8 @@ function client(reply: (path: string, body: any) => unknown, now = () => NOW) {
     const r = reply(url.pathname, body)
     return r instanceof Response ? r : new Response(JSON.stringify(r), { status: 200 })
   }) as typeof globalThis.fetch
-  const venue = createHyperliquid({ base: BASE, account: ACCOUNT, agentKey: KEY, fetch, clock: now })
-  return { venue, calls }
+  const venue = createHyperliquid({ base: BASE, account: ACCOUNT, agentKey: KEY, fetch, clock: now, sleep: async ms => { sleeps.push(ms) }, cloid: () => CLOID })
+  return { venue, calls, sleeps }
 }
 
 const byType = (routes: Record<string, unknown>) => (_: string, body: any) => routes[body.type]
@@ -141,19 +143,20 @@ test('best: lowest ask for Buy, highest bid for Sell, null when empty', async ()
 
 const filled = { status: 'ok', response: { type: 'order', data: { statuses: [{ filled: { totalSz: '20.0', avgPx: '0.5105', oid: 77747314 } }] } } }
 
-test('order sends a signed IOC limit with wire strings', async () => {
+test('order sends a signed IOC limit with wire strings, a client order id and an expiry', async () => {
   const { venue, calls } = client(() => filled)
   assert.deepEqual(await venue.order(100272340, 'Buy', 20, 0.51999), { shares: 20, avgPrice: 0.5105 })
   const [call] = calls
   assert.equal(call.url.href, `${BASE}/exchange`)
   const action = {
     type: 'order',
-    orders: [{ a: 100272340, b: true, p: '0.52', s: '20', r: false, t: { limit: { tif: 'Ioc' } } }],
+    orders: [{ a: 100272340, b: true, p: '0.52', s: '20', r: false, t: { limit: { tif: 'Ioc' } }, c: CLOID }],
     grouping: 'na',
   }
-  assert.deepEqual(call.body, { action, nonce: NOW, signature: signL1(KEY, action, NOW, false), vaultAddress: null })
+  const expiresAfter = NOW + 10_000
+  assert.deepEqual(call.body, { action, nonce: NOW, signature: signL1(KEY, action, NOW, false, null, expiresAfter), vaultAddress: null, expiresAfter })
   assert.deepEqual(Object.keys(call.body.action), ['type', 'orders', 'grouping'])
-  assert.deepEqual(Object.keys(call.body.action.orders[0]), ['a', 'b', 'p', 's', 'r', 't'])
+  assert.deepEqual(Object.keys(call.body.action.orders[0]), ['a', 'b', 'p', 's', 'r', 't', 'c'])
   assert.match(call.body.signature.r, /^0x[0-9a-f]{1,64}$/)
   assert.match(call.body.signature.s, /^0x[0-9a-f]{1,64}$/)
   assert.ok([27, 28].includes(call.body.signature.v))
@@ -202,11 +205,41 @@ test('template outcomes get a readable title', async () => {
   assert.deepEqual(ms.map(m => m.title), ['BTC >= 100,000', 'BTC touches 100,000', 'Real Madrid'])
 })
 
-test('an order whose reply is lost is an unknown result; a 4xx is a refusal', async () => {
+test('an order whose reply is lost stays an unknown result while the book cannot be asked; a 4xx is a refusal', async () => {
   const dropped = client(() => { throw new TypeError('fetch failed') })
   await assert.rejects(dropped.venue.order(100272340, 'Buy', 5, 0.4), { name: 'UnknownResult', message: 'fetch failed' })
   const gateway = client(() => new Response('bad gateway', { status: 502 }))
   await assert.rejects(gateway.venue.order(100272340, 'Buy', 5, 0.4), { name: 'UnknownResult' })
   const refused = client(() => new Response('{"error":"bad"}', { status: 422 }))
   await assert.rejects(refused.venue.order(100272340, 'Buy', 5, 0.4), (e: Error) => e.name === 'Error' && /HTTP 422/.test(e.message))
+  assert.equal(refused.calls.length, 1) // a sure refusal does not ask the book
+})
+
+/** The order request is lost; reads answer from `routes`. */
+const lostReply = (routes: Record<string, unknown>) => client((path, body) => {
+  if (path === '/exchange') throw new TypeError('fetch failed')
+  return routes[body.type]
+})
+
+test('a lost reply waits out the expiry, then the book says the order never arrived', async () => {
+  const { venue, calls, sleeps } = lostReply({ orderStatus: { status: 'unknownOid' } })
+  await assert.rejects(venue.order(100272340, 'Buy', 20, 0.52), (e: Error) => e.name === 'Error' && /never reached Hyperliquid/.test(e.message))
+  assert.deepEqual(sleeps, [12_000]) // expiresAfter (nonce + 10 s) + 2 s for clock skew
+  assert.deepEqual(calls[1].body, { type: 'orderStatus', user: ACCOUNT, oid: CLOID })
+  assert.equal(calls.length, 2)
+})
+
+test('a lost reply of an order that filled is summed from its own fills', async () => {
+  const { venue } = lostReply({
+    orderStatus: { status: 'order', order: { order: { oid: 42 }, status: 'filled' } },
+    userFills: [{ oid: 42, px: '0.51', sz: '15' }, { oid: 7, px: '0.9', sz: '100' }, { oid: 42, px: '0.52', sz: '5' }],
+  })
+  const f = await venue.order(100272340, 'Buy', 20, 0.52)
+  assert.equal(f.shares, 20)
+  assert.ok(Math.abs(f.avgPrice - 0.5125) < 1e-12)
+})
+
+test('a lost reply of an order that reached the book without a fill is a sure "not filled"', async () => {
+  const { venue } = lostReply({ orderStatus: { status: 'order', order: { order: { oid: 42 }, status: 'canceled' } }, userFills: [{ oid: 7, px: '0.9', sz: '1' }] })
+  await assert.rejects(venue.order(100272340, 'Buy', 20, 0.52), (e: Error) => e.name === 'Error' && /did not fill/.test(e.message))
 })

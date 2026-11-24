@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { signL1 } from './sign.ts'
 import type { Account, Filled, Market, OutcomeSide, Side, Venue } from './types.ts'
 
@@ -5,6 +6,8 @@ const TESTNET_HOST = 'api.hyperliquid-testnet.xyz'
 const READ_TIMEOUT_MS = 8000
 const ORDER_TIMEOUT_MS = 10_000
 const META_TTL_MS = 60_000
+// shortcut: covers our clock running ahead of the exchange's by up to 2 s; an unsynced clock needs more.
+const EXPIRY_MARGIN_MS = 2000
 
 /** Money safety: testnet only, so any other host stops the server. */
 export function assertTestnet(base: string): void {
@@ -16,6 +19,8 @@ type Outcome = { outcome: number; name: string; description: string; sideSpecs: 
 type Level = { px: string; sz: string }
 type Status = { filled?: { totalSz: string; avgPx: string }; error?: string }
 type ExchangeReply = { status: string; response: { data?: { statuses?: Status[] } } | string }
+type OrderStatus = { status: 'unknownOid' } | { status: 'order'; order: { order: { oid: number } } }
+type Fill = { oid: number; px: string; sz: string }
 
 /** 'class:priceBinary|underlying:BTC' → fields; plain-text descriptions have none. */
 function fields(description: string): Record<string, string> {
@@ -61,10 +66,15 @@ function priceWire(price: number, side: Side): string {
   return (steps / 1e4).toFixed(4).replace(/\.?0+$/, '')
 }
 
-export function createHyperliquid(o: { base: string; account: string; agentKey: string; fetch?: typeof fetch; clock?: () => number }): Venue {
+export function createHyperliquid(o: {
+  base: string; account: string; agentKey: string
+  fetch?: typeof fetch; clock?: () => number; sleep?: (ms: number) => Promise<void>; cloid?: () => string
+}): Venue {
   assertTestnet(o.base)
   const doFetch = o.fetch ?? fetch
   const clock = o.clock ?? Date.now
+  const sleep = o.sleep ?? (ms => new Promise<void>(r => setTimeout(r, ms)))
+  const newCloid = o.cloid ?? (() => `0x${randomBytes(16).toString('hex')}`)
   let meta: { at: number; outcomes: Outcome[] } | null = null
   let lastNonce = 0
 
@@ -79,6 +89,28 @@ export function createHyperliquid(o: { base: string; account: string; agentKey: 
     return (await res.json()) as T
   }
   const info = <T>(body: Record<string, unknown>) => post<T>('/info', body)
+
+  /**
+   * The reply to an order was lost. Once its expiresAfter has passed the exchange can no longer take it,
+   * so the order book has the final answer: never placed, placed without a fill, or filled (summed from the fills).
+   */
+  async function settle(cloid: string, expiresAfter: number, lost: Error): Promise<Filled> {
+    await sleep(Math.max(0, expiresAfter + EXPIRY_MARGIN_MS - clock()))
+    let found: OrderStatus
+    let fills: Fill[]
+    try {
+      found = await info<OrderStatus>({ type: 'orderStatus', user: o.account, oid: cloid })
+      fills = found.status === 'order' ? await info<Fill[]>({ type: 'userFills', user: o.account }) : []
+    } catch {
+      lost.name = 'UnknownResult' // the book could not be asked either: still unknown
+      throw lost
+    }
+    if (found.status !== 'order') throw new Error(`No reply (${lost.message}) and the order never reached Hyperliquid`)
+    const mine = fills.filter(f => f.oid === found.order.order.oid)
+    const shares = mine.reduce((n, f) => n + Number(f.sz), 0)
+    if (!shares) throw new Error(`No reply (${lost.message}); the order reached Hyperliquid and did not fill`)
+    return { shares, avgPrice: mine.reduce((n, f) => n + Number(f.px) * Number(f.sz), 0) / shares }
+  }
 
   async function outcomes(): Promise<Outcome[]> {
     if (!meta || clock() - meta.at > META_TTL_MS) {
@@ -133,20 +165,24 @@ export function createHyperliquid(o: { base: string; account: string; agentKey: 
     async order(asset, side, shares, limitPrice): Promise<Filled> {
       if (!Number.isInteger(shares) || shares <= 0) throw new Error(`Shares must be a positive whole number, got ${shares}`)
       if (!(limitPrice > 0)) throw new Error(`Bad limit price ${limitPrice}`)
+      // The client order id (cloid) finds this order again if its reply is lost. Key order matters: it is hashed.
+      const cloid = newCloid()
       const action = {
         type: 'order',
-        orders: [{ a: asset, b: side === 'Buy', p: priceWire(limitPrice, side), s: String(shares), r: false, t: { limit: { tif: 'Ioc' } } }],
+        orders: [{ a: asset, b: side === 'Buy', p: priceWire(limitPrice, side), s: String(shares), r: false, t: { limit: { tif: 'Ioc' } }, c: cloid }],
         grouping: 'na',
       }
       const nonce = lastNonce = Math.max(clock(), lastNonce + 1) // two orders in one millisecond must not share a nonce
-      const signature = signL1(o.agentKey, action, nonce, false)
+      // The exchange drops the action after this, so a request stuck in transit cannot fill once we have given up on it.
+      const expiresAfter = nonce + ORDER_TIMEOUT_MS
+      const signature = signL1(o.agentKey, action, nonce, false, null, expiresAfter)
       let reply: ExchangeReply
       try {
-        reply = await post<ExchangeReply>('/exchange', { action, nonce, signature, vaultAddress: null }, ORDER_TIMEOUT_MS)
+        reply = await post<ExchangeReply>('/exchange', { action, nonce, signature, vaultAddress: null, expiresAfter }, ORDER_TIMEOUT_MS)
       } catch (e) {
-        // A dropped connection or a 5xx may come after the order reached the book; only a 4xx is a sure refusal.
-        if ((e as Error).name !== 'TimeoutError' && !/^Hyperliquid HTTP 4\d\d/.test((e as Error).message)) (e as Error).name = 'UnknownResult'
-        throw e
+        // A dropped connection, a timeout or a 5xx may come after the order reached the book; only a 4xx is a sure refusal.
+        if (/^Hyperliquid HTTP 4\d\d/.test((e as Error).message)) throw e
+        return settle(cloid, expiresAfter, e as Error)
       }
       if (reply.status !== 'ok' || typeof reply.response === 'string') throw new Error(String(reply.response))
       const status = reply.response.data?.statuses?.[0]

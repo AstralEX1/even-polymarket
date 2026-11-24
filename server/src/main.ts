@@ -19,7 +19,7 @@ function fail(message: string): never {
 const token = env.APP_TOKEN ?? ''
 const port = Number(env.PORT) || 8788
 const host = env.HOST || '127.0.0.1'
-const problem = tokenProblem(token, host)
+const problem = tokenProblem(token, host, env.PUBLIC_URL)
 if (problem) fail(problem)
 
 let venue: Venue

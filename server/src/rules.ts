@@ -72,6 +72,9 @@ export const makeCard = (now: number, key: string, title: string, question: stri
 export const cashOutQuestion = (shares: number, name: string, price: number, cost: number) =>
   `Cash out ${shares} ${name} for ${dollars(shares * price)} (${money(shares * price - cost)})?`
 
+/** Hyperliquid refuses an order worth less than this, counted at its limit price. */
+export const MIN_ORDER_USD = 10
+
 /** Worst price an order from a card may fill at: the card price ± slippage, kept inside 0.01..0.99. */
 export const limitPrice = (type: 'buy' | 'sell', price: number, slippagePts: number) =>
   type === 'buy' ? Math.min(0.99, price + slippagePts / 100) : Math.max(0.01, price - slippagePts / 100)

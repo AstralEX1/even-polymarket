@@ -17,8 +17,9 @@ G2 glasses ──BLE── Even app WebView (app/)  ──HTTP + Bearer──▶
 
 - The app holds no keys. The server holds the Hyperliquid **API wallet** key: it can trade but cannot withdraw.
 - `assertTestnet` stops the server on any host other than `https://api.hyperliquid-testnet.xyz`.
-- A YES runs these checks again on the server: card id and expiry, data younger than 10 s, daily-loss lock, cool-down, max bet at the worst fill price, and best price within slippage. Then it sends an IOC limit order.
-- A write that times out or returns 5xx is reported as "unknown result", never as "failed".
+- A voice bet whose whole shares come to less than Hyperliquid's $10 order minimum (at the limit price) gets no card. The reply names the amount that is enough.
+- A YES runs these checks again on the server: card id and expiry, data younger than 10 s, daily-loss lock, cool-down, max bet at the worst fill price, and best price within slippage. Then it sends an IOC limit order with a client order id (`cloid`) and `expiresAfter` = nonce + 10 s.
+- If the reply is lost (timeout, dropped connection or 5xx), the server waits until the order's expiry has passed, then asks `orderStatus` by `cloid` and sums `userFills` for that order. The result is a definite answer: never arrived, did not fill, or filled N at an average price. The answer is "unknown result" only when those reads fail too.
 - Limits: lowering one applies at once, and raising one waits 24 h (`applyLimits`). The day's lock and cool-down survive a restart (`server/data/day.json`, atomic write).
 
 ## Run
@@ -37,13 +38,28 @@ On the phone page, set the server to `http://localhost:8788` and the token to `A
 
 Live testnet: set `VENUE=hyperliquid`, `HL_ACCOUNT` (your testnet address) and `HL_AGENT_KEY` (from app.hyperliquid-testnet.xyz/API). Voice needs `OPENAI_API_KEY`.
 
+### Real glasses
+
+The app runs in the Even app's WebView on the phone, where `localhost` is the phone itself. The server stays on your machine (keys and the day boundary stay local) and is reached through an https tunnel:
+
+```bash
+tailscale funnel 8788                              # stable https://<machine>.<tailnet>.ts.net
+# or: cloudflared tunnel --url http://127.0.0.1:8788   (new URL on every run: re-pack)
+```
+
+Set `PUBLIC_URL` to that address and `APP_TOKEN` to 16+ characters; the server refuses to start with a shorter one. Then run:
+
+```bash
+npm run pack      # build; whitelists PUBLIC_URL's origin and makes it the default server → glance-odds.ehpk
+```
+
 ## Test and build
 
 ```bash
-npm test          # node --test, 106 tests (1 live test runs only with LIVE=1)
+npm test          # node --test (the live test runs only with LIVE=1)
 npm run typecheck
 npm run build     # app/dist
-npx evenhub pack app/app.json app/dist -o glance-odds.ehpk
+npm run pack      # app/dist → glance-odds.ehpk (see Real glasses)
 ```
 
 ## Layout
@@ -60,7 +76,8 @@ npx evenhub pack app/app.json app/dist -o glance-odds.ehpk
 
 - Settlement detection compares USDC against held tokens over one 2 s tick, so a transfer at the same moment blurs it (`session.ts`).
 - The day boundary uses the server's time zone, which is correct while the server runs on the user's machine.
-- `app.json` whitelists only `http://localhost:8788`, so a packed app reaches only a local server.
+- Resolving a lost reply assumes this machine's clock is at most 2 s ahead of Hyperliquid's (`EXPIRY_MARGIN_MS`).
+- Whether Hyperliquid also applies the $10 minimum to a sell (a cash-out of a small position) is not verified. Sells are not pre-checked.
 - Speech end-pointing uses a fixed noise-floor ratio and is not tuned on real glasses.
 - Settings live in WebView `localStorage`.
 - The default market (`27159`, KC vs BUF, 27 Nov 2026) expires. `daily:BTC` rolls over by itself.
