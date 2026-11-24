@@ -316,3 +316,23 @@ test('an order that fills while a tick is reading keeps the account it wrote', a
   assert.deepEqual(t.s.state().markets[0].holdings, []) // not the sold holding back from the older read
   assert.equal(t.s.state().usdc, 1009.8)
 })
+
+test('a booked settlement decides the cool-down even when other USDC moved in the same tick', async () => {
+  const lost = setup()
+  lost.venue.acct.holdings = [{ token: '+271590', shares: 30, cost: 12 }]
+  await lost.s.tick()
+  lost.venue.acct.holdings = []
+  lost.venue.acct.usdc += 100 // a transfer landed with the settlement: by USDC alone this looks like a win
+  lost.venue.settled = { '+271590': -12 }
+  await lost.s.tick()
+  assert.ok(lost.s.state().coolDownUntil > 0)
+
+  const won = setup()
+  won.venue.acct.holdings = [{ token: '+271590', shares: 30, cost: 12 }]
+  await won.s.tick()
+  won.venue.acct.holdings = []
+  won.venue.acct.usdc += 30 - 50 // paid $30 while $50 went out: by USDC alone this looks like a loss
+  won.venue.settled = { '+271590': 18 }
+  await won.s.tick()
+  assert.equal(won.s.state().coolDownUntil, 0)
+})

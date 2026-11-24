@@ -55,6 +55,8 @@ export interface Venue {
   best(coin: string, side: Side): Promise<number | null>
   /** Immediate-or-cancel limit order for whole shares. Resolves with what filled; throws when nothing filled. */
   order(asset: number, side: Side, shares: number, limitPrice: number): Promise<Filled>
+  /** Realised PnL of settlements booked at or after `since` (ms), by spot token ('+271590'). */
+  settlements(since: number): Promise<Record<string, number>>
 }
 
 /** Live odds from Polymarket. */

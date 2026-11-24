@@ -243,3 +243,16 @@ test('a lost reply of an order that reached the book without a fill is a sure "n
   const { venue } = lostReply({ orderStatus: { status: 'order', order: { order: { oid: 42 }, status: 'canceled' } }, userFills: [{ oid: 7, px: '0.9', sz: '1' }] })
   await assert.rejects(venue.order(100272340, 'Buy', 20, 0.52), (e: Error) => e.name === 'Error' && /did not fill/.test(e.message))
 })
+
+test('settlements: settlement fills at or after a time, summed by spot token', async () => {
+  // The three settlements are trimmed from testnet userFills of 2026-11-23/24; the sale is a plain trade.
+  const fills = [
+    { coin: '#273760', px: '0.0', sz: '72.0', side: 'A', dir: 'Settlement', closedPnl: '-35.28', time: 1795442406106, oid: 65835645930 },
+    { coin: '#273761', px: '1.0', sz: '68.0', side: 'A', dir: 'Settlement', closedPnl: '34.68', time: 1795442406106, oid: 65835645932 },
+    { coin: '#272341', px: '0.0', sz: '3.0', side: 'A', dir: 'Settlement', closedPnl: '-1.47', time: 1795402812933, oid: 65822469377 },
+    { coin: '#273220', px: '0.49', sz: '9.0', side: 'A', dir: 'Sell', closedPnl: '-0.18', time: 1795442406500, oid: 1 },
+  ]
+  const { venue, calls } = client(byType({ userFills: fills }))
+  assert.deepEqual(await venue.settlements(1795440000000), { '+273760': -35.28, '+273761': 34.68 })
+  assert.deepEqual(calls[0].body, { type: 'userFills', user: ACCOUNT })
+})

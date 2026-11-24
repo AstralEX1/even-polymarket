@@ -73,7 +73,7 @@ npm run pack      # app/dist → glance-odds.ehpk (see Real glasses)
 
 ## Known limitations
 
-- Settlement detection compares USDC against held tokens over one 2 s tick, so a transfer at the same moment blurs it (`session.ts`).
+- A lost settlement is read from its `userFills` entry (`dir: "Settlement"`, realised PnL). A holding that vanished without one, such as a sale on the web, is still judged by USDC over one 2 s tick, so a transfer at the same moment blurs it (`session.ts`).
 - The day boundary uses the server's time zone, which is correct while the server runs on the user's machine.
 - Resolving a lost reply assumes this machine's clock is at most 2 s ahead of Hyperliquid's (`EXPIRY_MARGIN_MS`).
 - Speech end-pointing uses a fixed noise-floor ratio and is not tuned on real glasses.

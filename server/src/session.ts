@@ -31,6 +31,7 @@ export interface DayStore {
 const TOAST_MS = 5_000
 const DAY_MS = 86_400_000
 const STALE_MS = 10_000
+const SETTLE_SLACK_MS = 60_000 // settlement fills looked up from a minute before the last good tick
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const memoryStore = (): DayStore => { let d: DayState | null = null; return { load: () => d, save: x => { d = x } } }
@@ -75,11 +76,18 @@ export function createSession(venue: Venue, oddsSource: Odds, getConfig: () => C
     markets = nextMarkets
     // An order filled while these reads were out and already put the account after it in place: this read is older.
     if (wrote !== wroteBefore) next = account
-    // A holding that vanished settled (our own sells refresh `account` at once, so they are not seen here).
-    // It lost when the USDC it paid out is below its cost; that starts the cool-down like a losing cash-out.
-    // shortcut: USDC moved by anything else in the same 2 s (a trade on the web) blurs this; track settlements by outcome if that matters.
+    // A holding that vanished settled or was sold elsewhere (our own sells refresh `account` at once, so they are not seen here).
+    // A lost one starts the cool-down like a losing cash-out. Hyperliquid books a settlement as a fill with its realised PnL,
+    // which stays exact when other USDC moves in the same tick. One not booked (a sale on the web, or a fill not listed yet)
+    // falls back to the USDC it paid out against its cost.
+    // shortcut: that fallback still reads other USDC moved in the same 2 s as part of the sale; match userFills by token if web sales matter.
     const gone = account.holdings.filter(h => !next.holdings.some(x => x.token === h.token))
-    if (gone.length && next.usdc - account.usdc < gone.reduce((sum, h) => sum + h.cost, 0) - 0.005) coolDown()
+    if (gone.length) {
+      const booked = await venue.settlements(updatedAt - SETTLE_SLACK_MS).catch((): Record<string, number> => ({}))
+      const unbooked = gone.filter(h => !(h.token in booked))
+      const paidOut = next.usdc - account.usdc
+      if (gone.some(h => booked[h.token] < 0) || (unbooked.length && paidOut < unbooked.reduce((sum, h) => sum + h.cost, 0) - 0.005)) coolDown()
+    }
     // USDC that arrived while no holding changed is a transfer in (faucet, perps), not a win: it must not widen the loss limit.
     const unchanged = next.holdings.length === account.holdings.length &&
       next.holdings.every(x => account.holdings.some(h => h.token === x.token && h.shares === x.shares))
