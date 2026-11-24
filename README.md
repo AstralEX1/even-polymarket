@@ -59,7 +59,10 @@ npm test          # node --test (the live test runs only with LIVE=1)
 npm run typecheck
 npm run build     # app/dist
 npm run pack      # app/dist → sideline-odds.ehpk (see Real glasses)
+npm run e2e       # ~45 s in the simulator on the fake venue: the demo's swing card, cash out on the glasses list, server says "Sold"
 ```
+
+CI (`.github/workflows/ci.yml`) runs typecheck, tests and pack on every push to main and every PR. The e2e needs a display (it opens the simulator window), so it runs locally only.
 
 ## Layout
 
