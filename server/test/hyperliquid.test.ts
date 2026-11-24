@@ -256,3 +256,10 @@ test('settlements: settlement fills at or after a time, summed by spot token', a
   assert.deepEqual(await venue.settlements(1795440000000), { '+273760': -35.28, '+273761': 34.68 })
   assert.deepEqual(calls[0].body, { type: 'userFills', user: ACCOUNT })
 })
+
+test('upcoming: games kicking off within a week or begun within 4 h, soonest first; not dailies, props or old games', async () => {
+  const games = await client(byType({ outcomeMeta })).venue.upcoming()
+  assert.deepEqual(games.map(g => [g.key, g.title, g.startsAt]), [['26947', 'ARI vs KC', Date.UTC(2026, 10, 22, 18, 0)]])
+  const later = await client(byType({ outcomeMeta }), () => Date.UTC(2026, 10, 22, 23, 0)).venue.upcoming()
+  assert.equal(later.length, 0) // 5 h after kick-off it is taken as over
+})

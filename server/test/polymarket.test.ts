@@ -245,3 +245,18 @@ test('prices: with a feed, the websocket book answers and REST only fills in whi
   assert.ok(p && Math.abs(p[0] - 0.6) < 1e-9 && Math.abs(p[1] - 0.4) < 1e-9)
   assert.equal(calls.length, before) // the book answered: no request
 })
+
+test('match: the moneyline that kicks off the same minute between the same sides; cached; none or several is null', async () => {
+  const at = Date.UTC(2026, 10, 27, 1, 20)
+  const url = `${GAMMA}/markets?closed=false&sports_market_types=moneyline&end_date_min=2026-11-27T01:19:00Z&end_date_max=2026-11-27T01:21:00Z&limit=100`
+  const other = { ...MONEYLINE, slug: 'nhl-utah-min-2026-11-27', outcomes: '["Utah", "Wild"]' }
+  const { fetch, calls } = fake({ [url]: [other, MONEYLINE] })
+  const kc = { key: '27159', outcome: 27159, title: 'KC vs BUF', sides: [KC, BUF] as [typeof KC, typeof BUF], startsAt: at, endsAt: 0 }
+  const pm = createPolymarket({ fetch })
+  assert.equal(await pm.match(kc), 'nfl-kc-buf-2026-11-27')
+  assert.equal(await pm.match(kc), 'nfl-kc-buf-2026-11-27')
+  assert.equal(calls.length, 1)
+  assert.equal(await createPolymarket({ fetch: fake({ [url]: [MONEYLINE, MONEYLINE] }).fetch }).match(kc), null) // two candidates: no guess
+  assert.equal(await createPolymarket({ fetch: fake({ [url]: [other] }).fetch }).match(kc), null)
+  assert.equal(await pm.match({ ...kc, key: 'x', startsAt: 0 }), null) // no kick-off time, nothing to match on
+})

@@ -57,12 +57,25 @@ export interface Venue {
   order(asset: number, side: Side, shares: number, limitPrice: number): Promise<Filled>
   /** Realised PnL of settlements booked at or after `since` (ms), by spot token ('+271590'). */
   settlements(since: number): Promise<Record<string, number>>
+  /** Games (two-sided contests) that kick off within the next week or began in the last 4 hours, soonest first. */
+  upcoming(): Promise<Market[]>
 }
 
 /** Live odds from Polymarket. */
 export interface Odds {
   /** Price (0..1) of each Hyperliquid side, matched to the Polymarket market by name. null when the sides do not match. */
   prices(slug: string, sides: [OutcomeSide, OutcomeSide]): Promise<[number, number] | null>
+  /** Slug of the same game on Polymarket: its moneyline kicks off in the same minute between the same two sides. null when none or several do. */
+  match(m: Market): Promise<string | null>
+}
+
+/** A game the phone page offers: watching it puts it on the glasses with its live odds. */
+export interface Game {
+  key: string
+  title: string
+  startsAt: number
+  /** Polymarket slug found for it, null when there is none: then the glasses show Hyperliquid's own prices */
+  polymarket: string | null
 }
 
 export interface WatchedMarket {

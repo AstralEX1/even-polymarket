@@ -109,4 +109,7 @@ createServer({
     return shown()
   },
   transcribe: openaiKey ? (pcm, hint) => transcribe(pcm, openaiKey, hint) : undefined,
+  // A game without a Polymarket match still shows: its odds then come from Hyperliquid's own book.
+  games: async () => Promise.all((await venue.upcoming()).map(async m =>
+    ({ key: m.key, title: m.title, startsAt: m.startsAt, polymarket: await odds.match(m).catch(() => null) }))),
 }).listen(port, host, () => console.log(`Sideline Odds server on http://${host}:${port} (venue: ${mode}, voice: ${openaiKey ? 'on' : 'off'})`))

@@ -1,6 +1,6 @@
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
-import type { Config, ShownConfig } from './types.ts'
+import type { Config, Game, ShownConfig } from './types.ts'
 import type { Session } from './session.ts'
 import { validateConfig } from './config.ts'
 
@@ -53,7 +53,11 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 
 export type Transcribe = (pcm: Uint8Array, hint: string) => Promise<string>
 
-export function createServer(d: { session: Session; token: string; getConfig: () => ShownConfig; setConfig: (c: Config) => ShownConfig; transcribe?: Transcribe }): Server {
+export function createServer(d: {
+  session: Session; token: string; getConfig: () => ShownConfig; setConfig: (c: Config) => ShownConfig; transcribe?: Transcribe
+  /** The games the phone page offers, with their Polymarket slugs */
+  games?: () => Promise<Game[]>
+}): Server {
   return createHttpServer(async (req, res) => {
     // Any origin: the Even Hub WebView origin varies, and every route needs the token anyway.
     res.setHeader('Access-Control-Allow-Origin', '*')
@@ -70,6 +74,7 @@ export function createServer(d: { session: Session; token: string; getConfig: ()
       const route = `${req.method} ${path}`
       if (route === 'GET /api/state') return send(res, 200, d.session.state())
       if (route === 'GET /api/config') return send(res, 200, d.getConfig())
+      if (route === 'GET /api/games') return send(res, 200, d.games ? await d.games() : [])
       if (route === 'POST /api/answer') {
         const b = (await readJson(req)) as { cardId?: unknown; yes?: unknown } | null
         if (typeof b?.cardId !== 'string' || typeof b.yes !== 'boolean') throw new HttpError(400, 'Expected {cardId, yes}')

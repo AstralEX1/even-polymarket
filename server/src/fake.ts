@@ -31,6 +31,7 @@ export class FakeVenue implements Venue {
   async mids() { return this.read(this.midMap) }
   async account() { return this.read(this.acct) }
   async settlements() { return this.read(this.settled) }
+  async upcoming() { return this.read(this.list.filter(m => m.startsAt).sort((a, b) => a.startsAt - b.startsAt)) }
 
   async best(coin: string, s: Side) {
     const mid = this.midMap[coin]
@@ -66,6 +67,9 @@ export class FakeVenue implements Venue {
 
 export class FakeOdds implements Odds {
   map: Record<string, [number, number] | null> = {}
+  /** market key → Polymarket slug */
+  slugs: Record<string, string> = {}
+  async match(m: Market) { return this.slugs[m.key] ?? null }
   fail: string | null = null
   async prices(slug: string) {
     if (this.fail) throw new Error(this.fail)
@@ -82,7 +86,14 @@ export function demo(start: number, clock: () => number = Date.now) {
   const odds = new FakeOdds()
   const kc = market('27159', 27159, 'KC vs BUF', ['KC', 'Kansas City Chiefs'], ['BUF', 'Buffalo Bills'], start + 3 * 3_600_000, start - 30 * 60_000) // the game is on
   const btc = market('daily:BTC', 27234, 'BTC >= 60,393', ['Yes'], ['No'], start + 10 * 3_600_000)
-  venue.list = [kc, btc]
+  // Thanksgiving's late game: on the phone page's list, off the glasses until picked.
+  const phi = market('27150', 27150, 'PHI vs DAL', ['PHI', 'Philadelphia Eagles'], ['DAL', 'Dallas Cowboys'], start + 26 * 3_600_000, start + 2 * 3_600_000)
+  venue.list = [kc, btc, phi]
+  odds.slugs[kc.key] = 'nfl-kc-buf-2026-11-27'
+  odds.slugs[phi.key] = 'nfl-phi-dal-2026-11-26'
+  odds.map['nfl-phi-dal-2026-11-26'] = [0.62, 0.38]
+  venue.midMap[phi.sides[0].coin] = 0.6
+  venue.midMap[phi.sides[1].coin] = 0.4
   venue.acct = { usdc: 1000, holdings: [{ token: kc.sides[0].token, shares: 20, cost: 9 }] }
 
   const kcLive = (t: number) => {
