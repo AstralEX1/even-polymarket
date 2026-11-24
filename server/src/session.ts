@@ -47,6 +47,7 @@ export function createSession(venue: Venue, oddsSource: Odds, getConfig: () => C
   let toast: { text: string; until: number } | null = null
   let error: string | null = null
   let updatedAt = 0
+  let wrote = 0 // bumped each time an order puts a fresh account in place
 
   const say = (text: string) => { toast = { text, until: clock() + TOAST_MS } }
   const saveDay = () => { if (day) store.save(day) }
@@ -60,16 +61,20 @@ export function createSession(venue: Venue, oddsSource: Odds, getConfig: () => C
   async function tick() {
     const cfg = getConfig()
     const now = clock()
+    const wroteBefore = wrote
+    let nextMarkets: Market[]
     let next: Account
     let nextMids: Record<string, number>
     try {
-      markets = await venue.markets(cfg.markets.map(m => m.key))
-      nextMids = await venue.mids()
-      next = await venue.account()
+      // At once: one slow read costs one timeout, not three in a row against the 10 s freshness limit.
+      [nextMarkets, nextMids, next] = await Promise.all([venue.markets(cfg.markets.map(m => m.key)), venue.mids(), venue.account()])
     } catch (e) {
       error = errorText(e) // keep the last good data, skip rules on a partial read
       return
     }
+    markets = nextMarkets
+    // An order filled while these reads were out and already put the account after it in place: this read is older.
+    if (wrote !== wroteBefore) next = account
     // A holding that vanished settled (our own sells refresh `account` at once, so they are not seen here).
     // It lost when the USDC it paid out is below its cost; that starts the cool-down like a losing cash-out.
     // shortcut: USDC moved by anything else in the same 2 s (a trade on the web) blurs this; track settlements by outcome if that matters.
@@ -170,6 +175,7 @@ export function createSession(venue: Venue, oddsSource: Odds, getConfig: () => C
     }
     try {
       account = await venue.account() // the new balance shows now, and the tick does not take this sell for a settlement
+      wrote++
     } catch { /* the next tick catches up */ }
     say(message)
     return { ok: true, message }

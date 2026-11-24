@@ -281,3 +281,40 @@ test('a spoken "yes" buys like a YES tap, "no" skips, and anything else leaves t
   assert.deepEqual(await t.s.confirm('no thanks', t.s.state().card!.id), { ok: true, message: 'Skipped' })
   assert.equal(t.venue.calls.length, 1)
 })
+
+test('Hyperliquid reads go out at once, so one slow read costs one timeout', async () => {
+  const t = setup()
+  let release!: () => void
+  const gate = new Promise<void>(r => { release = r })
+  const asked: string[] = []
+  for (const k of ['markets', 'mids', 'account'] as const) {
+    const real = (t.venue[k] as () => Promise<unknown>).bind(t.venue)
+    ;(t.venue as any)[k] = async (...a: unknown[]) => { asked.push(k); await gate; return (real as any)(...a) }
+  }
+  const ticking = t.s.tick()
+  await new Promise(r => setImmediate(r))
+  assert.deepEqual(asked, ['markets', 'mids', 'account']) // all three before any answered
+  release()
+  await ticking
+  assert.equal(t.s.state().markets.length, 1)
+})
+
+test('an order that fills while a tick is reading keeps the account it wrote', async () => {
+  const t = setup()
+  t.venue.acct.holdings = [{ token: '+271590', shares: 20, cost: 12 }]
+  await t.s.tick()
+  await t.s.voice('cash out', '27159')
+  const card = t.s.state().card!
+  // This tick reads the account before the sell and gets its answer after it.
+  let release!: () => void
+  const gate = new Promise<void>(r => { release = r })
+  const read = t.venue.account.bind(t.venue)
+  t.venue.account = async () => { t.venue.account = read; const before = await read(); await gate; return before }
+  const ticking = t.s.tick()
+  await new Promise(r => setImmediate(r))
+  assert.equal((await t.s.answer(card.id, true)).message, 'Sold 20 KC for $9.80 (-$2.20)')
+  release()
+  await ticking
+  assert.deepEqual(t.s.state().markets[0].holdings, []) // not the sold holding back from the older read
+  assert.equal(t.s.state().usdc, 1009.8)
+})
