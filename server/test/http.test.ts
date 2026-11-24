@@ -144,5 +144,6 @@ test('a lower limit counts at once, a higher one waits a day', () => {
 test('a short token is refused off loopback', () => {
   assert.match(tokenProblem('short', '0.0.0.0') ?? '', /16/)
   assert.equal(tokenProblem('short', '127.0.0.1'), null)
+  assert.match(tokenProblem('short', '127.0.0.1', 'https://glance.example.ts.net') ?? '', /16/) // a tunnel makes loopback public
   assert.match(tokenProblem('', '127.0.0.1') ?? '', /APP_TOKEN/)
 })

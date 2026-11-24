@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 import type { Config, SessionState, ShownConfig } from '../../server/src/types.ts'
 
-export const DEFAULT_SERVER = 'http://localhost:8788'
+// A packed app gets the tunnel address from PUBLIC_URL at build time: on the phone, localhost is the phone itself.
+export const DEFAULT_SERVER: string = import.meta.env.PUBLIC_URL || 'http://localhost:8788'
 const TIMEOUT_MS = 4000
 const VOICE_TIMEOUT_MS = 20_000 // upload plus transcription
 // Dev server only: in a build DEV is false and the bundler drops the token.

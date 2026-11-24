@@ -12,5 +12,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["server", "app"]
+  "include": ["server", "app", "scripts"]
 }

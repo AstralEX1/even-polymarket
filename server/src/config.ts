@@ -62,10 +62,10 @@ export function applyLimits(cur: Config, next: Config, now: number): { config: C
 
 const LOOPBACK = ['127.0.0.1', 'localhost', '::1']
 
-/** The API token guards betting. Off loopback it must be long enough not to guess. */
-export function tokenProblem(token: string, host: string): string | null {
+/** The API token guards betting. Reachable from other machines (off loopback, or through a tunnel at `publicUrl`) it must be long enough not to guess. */
+export function tokenProblem(token: string, host: string, publicUrl = ''): string | null {
   if (!token) return 'Set APP_TOKEN in .env (see .env.example).'
-  if (!LOOPBACK.includes(host) && token.length < 16) return 'APP_TOKEN must be at least 16 characters when HOST is not loopback.'
+  if ((publicUrl || !LOOPBACK.includes(host)) && token.length < 16) return 'APP_TOKEN must be at least 16 characters when HOST is not loopback or PUBLIC_URL is set.'
   return null
 }
 
