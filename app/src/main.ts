@@ -258,7 +258,9 @@ async function startGlasses() {
   shown = renderScreen(null, focus, offline)
   pageCard = null // starts on the market page; the first poll switches to a card page if one is waiting
   const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page(shown, null)))
-  $('glasses').textContent = result === 0 ? '· glasses on' : `· glasses display error ${result}`
+  // A plain browser also gets a bridge, which answers 1 (invalid): the page says no glasses, the console keeps the code.
+  if (result !== 0) console.warn('createStartUpPageContainer returned', result)
+  $('glasses').textContent = result === 0 ? '· glasses on' : '· no glasses here'
   bridge.onEvenHubEvent(e => void onEvent(e))
 }
 
